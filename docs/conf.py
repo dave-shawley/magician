@@ -38,6 +38,7 @@ html_theme_options = {
     'github_repo': 'magician',
     'description': 'Pulling rabbits out of an async hat',
     'github_banner': True,
+    'travis_button': True,
 }
 exclude_patterns = []
 
