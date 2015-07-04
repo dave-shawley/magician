@@ -1,3 +1,4 @@
 -rrequirements.txt
 -rtest-requirements.txt
-Sphinx
+alabaster>=0.7.6,<1
+Sphinx>=1.3.1,<1.4
