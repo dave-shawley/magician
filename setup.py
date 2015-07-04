@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 #
-
 import setuptools
 
 import magician
@@ -31,7 +30,6 @@ def read_requirements(file_name):
 install_requirements = read_requirements('requirements.txt')
 testing_requirements = read_requirements('test-requirements.txt')
 
-
 setuptools.setup(
     name='magician',
     description='Pulls rabbits out of the Async hat.',
@@ -50,7 +48,6 @@ setuptools.setup(
         'License :: OSI Approved :: BSD License',
         'Operating System :: OS Independent',
         'Programming Language :: Python',
-        'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3.4',
         'Development Status :: 1 - Planning',
     ],
