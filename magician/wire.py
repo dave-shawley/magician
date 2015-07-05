@@ -19,6 +19,7 @@ method that accepts a byte string.  You can use a :class:`file`, a
 writer.
 
 - :func:`.encode_short_string` encodes a string of at most 255 bytes
+- :func:`.encode_long_string` encodes string of arbitrary length
 
 The AMQP protocol elements are represented as class instances.  The
 :class:`.Frame` class is a top-level frame returned from the
@@ -109,6 +110,22 @@ def decode_short_string(data, offset):
     offset += 1
     string_data = bytes(data[offset:offset+string_length])
     return string_data, offset + string_length
+
+
+def encode_long_string(value, buffer):
+    """
+    Encode a long byte string.
+
+    :param bytes|str value: value to encode.  If the value has a ``encode``
+        attribute, then it will be called with a single parameter of
+        ``'utf-8'`` before the string is written
+    :param buffer: buffer to write the string to.  This value is expected
+        to have a ``write`` method.
+
+    """
+    value = value.encode('utf-8') if hasattr(value, 'encode') else value
+    buffer.write(struct.pack('>I', len(value)))
+    buffer.write(value)
 
 
 def decode_long_string(data, offset):

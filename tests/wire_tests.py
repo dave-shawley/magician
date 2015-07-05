@@ -1,4 +1,5 @@
 import io
+import struct
 import unittest
 
 from magician import wire
@@ -101,3 +102,15 @@ class EncodingTests(unittest.TestCase):
     def test_that_encode_short_string_rejects_long_strings(self):
         with self.assertRaises(ValueError):
             wire.encode_short_string(bytes(256), self.writer)
+
+    def test_that_encode_long_string_writes_bytes_as_is(self):
+        wire.encode_long_string(self.UTF8_VALUE, self.writer)
+        self.assertEqual(struct.unpack('>I', self.written[0:4])[0],
+                         len(self.UTF8_VALUE))
+        self.assertEqual(self.written[4:], self.UTF8_VALUE)
+
+    def test_that_encode_long_string_utf8_encodes_string(self):
+        wire.encode_long_string(self.UNICODE_VALUE, self.writer)
+        self.assertEqual(struct.unpack('>I', self.written[0:4])[0],
+                         len(self.UTF8_VALUE))
+        self.assertEqual(self.written[4:], self.UTF8_VALUE)
