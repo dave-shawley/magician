@@ -20,4 +20,4 @@ class ProtocolFailure(Exception):
         super(ProtocolFailure, self).__init__(self._message)
 
     def __str__(self):
-        return '{0}: {1}'.format(self.__class__.__name_, self._message)
+        return '{0}: {1}'.format(self.__class__, self._message)
