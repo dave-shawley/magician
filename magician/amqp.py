@@ -40,7 +40,7 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         self.writer = writer
 
         self.writer.write(b'AMQP\x00\x00\x09\x01')
-        yield from self._handle_frame()
+        frame = yield from wire.read_frame(self.reader)
 
     def close(self):
         pass
@@ -51,11 +51,6 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
 
     def consume_from(self, queue_name, callback):
         pass
-
-    @asyncio.coroutine
-    def _handle_frame(self):
-        frame = yield from wire.read_frame(self.reader)
-        self.logger.debug('decoded %r', frame)
 
 
 @asyncio.coroutine
