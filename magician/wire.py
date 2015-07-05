@@ -20,6 +20,7 @@ writer.
 
 - :func:`.encode_short_string` encodes a string of at most 255 bytes
 - :func:`.encode_long_string` encodes string of arbitrary length
+- :func:`.encode_table` encodes a dictionary as a AMQP table
 
 The AMQP protocol elements are represented as class instances.  The
 :class:`.Frame` class is a top-level frame returned from the
@@ -33,6 +34,7 @@ class method that decode instances from a byte string.
 
 """
 import asyncio
+import collections
 import logging
 import struct
 
@@ -40,6 +42,44 @@ from . import errors
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def encode_table(table, buffer):
+    """
+    Encode a table into a stream.
+
+    :param dict table: data to encode into a table
+    :param buffer: a seekable and writeable stream-like object.
+        Something like :class:`io.BytesIO` works well here.
+    :raises ValueError: if the table cannot be encoded
+
+    """
+    assert buffer.seekable()
+    buffer.write(b'\xFE\xED\xFA\xCE')
+    start_position = buffer.tell()
+    LOGGER.debug('starting table at %d', start_position)
+    field_names = sorted(table.keys())
+    for field_name in field_names:
+        field_value = table[field_name]
+        encode_short_string(field_name, buffer)
+        if isinstance(field_value, bool):
+            buffer.write(b't')
+            buffer.write(b'\x01' if field_value else b'\x00')
+        elif isinstance(field_value, (str, bytes)):
+            buffer.write(b'S')
+            encode_long_string(field_value, buffer)
+        elif isinstance(field_value, collections.Mapping):
+            buffer.write(b'F')
+            encode_table(field_value, buffer)
+        else:
+            raise ValueError('cannot encode {0} for field {1}'.format(
+                type(field_value), field_name))
+
+    bytes_written = buffer.tell() - start_position
+    LOGGER.debug('wrote %d bytes', bytes_written)
+    view = buffer.getbuffer()
+    view[start_position-4:start_position] = struct.pack('>I', bytes_written)
+    del view
 
 
 def decode_table(data, offset):

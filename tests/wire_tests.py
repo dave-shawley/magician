@@ -114,3 +114,27 @@ class EncodingTests(unittest.TestCase):
         self.assertEqual(struct.unpack('>I', self.written[0:4])[0],
                          len(self.UTF8_VALUE))
         self.assertEqual(self.written[4:], self.UTF8_VALUE)
+
+    def test_that_encode_table_handles_expected_value_types(self):
+        wire.encode_table({
+            'bytes_value': b'encoded as long string',
+            'dict': {'encoded': 'as table'},
+            'empty_dict': {},
+            'false_value': False,
+            'string_value': 'encoded as long string',
+            'true_value': True,
+        }, self.writer)
+        self.assertEqual(
+            self.written,
+            b'\x00\x00\x00\x99'
+            b'\x0Bbytes_valueS\x00\x00\x00\x16encoded as long string'
+            b'\x04dictF\x00\x00\x00\x15\x07encodedS\x00\x00\x00\x08as table'
+            b'\x0Aempty_dictF\x00\x00\x00\x00'
+            b'\x0Bfalse_valuet\x00'
+            b'\x0Cstring_valueS\x00\x00\x00\x16encoded as long string'
+            b'\x0Atrue_valuet\x01'
+        )
+
+    def test_that_encode_table_raises_exception_on_unhandled_types(self):
+        with self.assertRaises(ValueError):
+            wire.encode_table({'object_value': object()}, self.writer)
