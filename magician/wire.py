@@ -116,7 +116,7 @@ class Frame(object):
         cannot be decoded
 
     """
-    END_BYTE = 0xCE
+    END_BYTE = b'\xCE'
     METHOD = 1
     HEADER = 2
     BODY = 3
@@ -188,8 +188,6 @@ def read_frame(reader):
     frame_type, channel, frame_size = struct.unpack('>BHI', frame_header)
     frame_body = yield from reader.read(frame_size)
     frame_end = yield from reader.read(1)
-    frame_end = frame_end[0]
-
     if frame_end != Frame.END_BYTE:
         raise errors.ProtocolFailure('invalid frame end ({0:02x}) received',
                                      frame_end)
