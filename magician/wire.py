@@ -11,6 +11,15 @@ the remaining packet at.
 - :func:`.decode_table` parses a field table into a ``dict`` with byte
   strings as keys
 
+Protocol encoding primitives are similar.  They are simple functions that
+accept two parameters -- the value to be encoded and a *writer* to write
+the encoded value to.  The *writer* is anything that implements a ``write``
+method that accepts a byte string.  You can use a :class:`file`, a
+:class:`asyncio.StreamWriter`, or a :class:`io.BytesIO` instance as the
+writer.
+
+- :func:`.encode_short_string` encodes a string of at most 255 bytes
+
 The AMQP protocol elements are represented as class instances.  The
 :class:`.Frame` class is a top-level frame returned from the
 :func:`.read_frame` coroutine.  It's ``body`` attribute is an instance of
@@ -63,6 +72,26 @@ def decode_table(data, offset):
                                          field_type)
         table[field_name] = field_value
     return table, offset
+
+
+def encode_short_string(value, buffer):
+    """
+    Encode a short string.
+
+    :param bytes|str value: value to encode.  If the value has a ``encode``
+        attribute, then it will be called with a single parameter of
+        ``'utf-8'`` before the string is written
+    :param buffer: buffer to write the string to.  This value is expected
+        to have a ``write`` method.
+    :raises ValueError: if ``value`` is longer than 255 bytes
+
+    """
+    value = value.encode('utf-8') if hasattr(value, 'encode') else value
+    val_len = len(value)
+    if val_len >= 256:
+        raise ValueError('Cannot encode %d bytes as short string' % val_len)
+    buffer.write(bytes([val_len]))
+    buffer.write(value)
 
 
 def decode_short_string(data, offset):

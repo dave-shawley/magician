@@ -1,3 +1,4 @@
+import io
 import unittest
 
 from magician import wire
@@ -73,3 +74,30 @@ class FrameTests(unittest.TestCase):
         self.assertEqual(frame.body.security_mechanisms,
                          [b'AMQPLAIN', b'PLAIN'])
         self.assertEqual(frame.body.locales, [b'en_US'])
+
+
+class EncodingTests(unittest.TestCase):
+    UNICODE_VALUE = u'Ang\u00E9liqu\u00E9'
+    UTF8_VALUE = UNICODE_VALUE.encode('utf-8')
+
+    def setUp(self):
+        super(EncodingTests, self).setUp()
+        self.writer = io.BytesIO()
+
+    @property
+    def written(self):
+        return self.writer.getvalue()
+
+    def test_that_encode_short_string_writes_bytes_as_is(self):
+        wire.encode_short_string(self.UTF8_VALUE, self.writer)
+        self.assertEqual(self.written[0], len(self.UTF8_VALUE))
+        self.assertEqual(self.written[1:], self.UTF8_VALUE)
+
+    def test_that_encode_short_string_utf8_encodes_string(self):
+        wire.encode_short_string(self.UNICODE_VALUE, self.writer)
+        self.assertEqual(self.written[0], len(self.UTF8_VALUE))
+        self.assertEqual(self.written[1:], self.UTF8_VALUE)
+
+    def test_that_encode_short_string_rejects_long_strings(self):
+        with self.assertRaises(ValueError):
+            wire.encode_short_string(bytes(256), self.writer)
