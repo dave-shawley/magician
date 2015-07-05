@@ -1,7 +1,43 @@
 """
 Low-level AMQP protocol decoding.
 
-Protocol packet decoding primitives are implemented as simple functions
+This module contains the low-level methods for reading and writing AMQP
+packets.  It exposes two high-level functions for asynchronously reading
+a frame and writing a frame:
+
+- :func:`.read_frame` this co-routine reads a :class:`.Frame` instance
+  from a :class:`asyncio.StreamReader`
+- :func:`.write_frame` this function writes a composed frame out on a
+  :class:`asyncio.StreamWriter`
+
+Decoded frames returned from :func:`.read_frame` are represented as a
+:class:`Frame` instance which contains the frame data.  It contains the
+fully decoded frame as it's ``body`` attribute.
+
+- :class:`.Frame` represents a top-level frame
+- :class:`.Connection` represents a *Connection class* frame.
+
+Outgoing frames are handled by the AMQP class specific class.  Each of
+the classes that represent an AMQP class include class methods to write
+frames for some of the AMQP methods.  For example, the
+:meth:`.Connection.construct_start_ok` method will write a fully encoded
+frame body for the ``Connection.StartOK`` AMQP method.  Each of the methods
+are named using ``construct_`` as a prefix and accepts parameters for
+whatever properties are required to construct the frame.  The fully encoded
+frame is returned as a :class:`bytes` object.
+
+If you need access to the low-level encoding primitives, then they are
+available.  Each is implemented as a simple function that accepts two
+parameters -- the value to be written and a *writer* to write the value
+to.  A *writer* is anything that implements a ``write`` method that accepts
+a byte string such as a :class:`io.BytesIO` or :class:`asyncio.StreamWriter`
+instance.
+
+- :func:`.encode_short_string` encodes a string of at most 255 bytes
+- :func:`.encode_long_string` encodes string of arbitrary length
+- :func:`.encode_table` encodes a dictionary as a AMQP table
+
+Protocol packet decoding primitives are also implemented as simple functions
 that accept a byte buffer and the offset to start decoding at.  The return
 value is the similar, the decoded value and the offset to continue decoding
 the remaining packet at.
@@ -11,30 +47,10 @@ the remaining packet at.
 - :func:`.decode_table` parses a field table into a ``dict`` with byte
   strings as keys
 
-Protocol encoding primitives are similar.  They are simple functions that
-accept two parameters -- the value to be encoded and a *writer* to write
-the encoded value to.  The *writer* is anything that implements a ``write``
-method that accepts a byte string.  You can use a :class:`file`, a
-:class:`asyncio.StreamWriter`, or a :class:`io.BytesIO` instance as the
-writer.
-
-- :func:`.encode_short_string` encodes a string of at most 255 bytes
-- :func:`.encode_long_string` encodes string of arbitrary length
-- :func:`.encode_table` encodes a dictionary as a AMQP table
-
-The AMQP protocol elements are represented as class instances.  The
-:class:`.Frame` class is a top-level frame returned from the
-:func:`.read_frame` coroutine.  It's ``body`` attribute is an instance of
-a *payload class*.  Each of the payload classes implement a ``from_bytes``
-class method that decode instances from a byte string.
-
-- :class:`.Frame` represents a top-level frame.  The ``body`` attribute
-  is a instance of the appropriate payload class.
-- :class:`.Connection` represents a *Connection class* frame.
-
 """
 import asyncio
 import collections
+import io
 import logging
 import struct
 
@@ -236,13 +252,33 @@ class Frame(object):
 
 
 class Connection(object):
+    """
+    Wire-level details for the AMQP Connection Class.
+
+    The properties defined is dependent on the specific method that
+    this instance represents.
+
+    - **Connection.Start**: ``version_major``, ``version_minor``,
+      ``server_properties``, ``security_mechanisms``, ``locales``
+
+    """
     CLASS_ID = 10
 
     class Methods(object):
+        """Method constants defined for the AMQP Connection class."""
         START = 10
+        START_OK = 11
 
     @classmethod
     def from_bytes(cls, data):
+        """
+        Decodes `data` into a new instance.
+
+        :param bytes data: the packet to parse
+        :raises magician.errors.ProtocolFailure:
+            if `data` cannot be parsed  as a connection class frame
+
+        """
         self = cls()
         self.class_id = cls.CLASS_ID
         self.method_id = (data[0] << 8) | data[1]
@@ -257,6 +293,28 @@ class Connection(object):
             raise errors.ProtocolFailure('unknown connection method {0}',
                                          self.method_id)
         return self
+
+    @classmethod
+    def construct_start_ok(cls, client_properties, auth_mechanism, auth_value,
+                           locale):
+        """
+        Construct a ``Connection.StartOK`` frame.
+
+        :param dict client_properties: properties to declare to the
+            server for this connection
+        :param str auth_mechanism: authorization mechanism to employ
+        :param str auth_value: authorization data to pass to the server
+        :param str locale: message locale to select
+        :returns: the encode frame as a :class:`bytes` instance
+
+        """
+        writer = io.BytesIO()
+        writer.write(struct.pack('>HH', cls.CLASS_ID, cls.Methods.START_OK))
+        encode_table(client_properties, writer)
+        encode_short_string(auth_mechanism, writer)
+        encode_long_string(auth_value, writer)
+        encode_short_string(locale, writer)
+        return writer.getvalue()
 
 
 @asyncio.coroutine

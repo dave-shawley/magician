@@ -150,3 +150,20 @@ class EncodingTests(unittest.TestCase):
     def test_that_write_frame_rejects_invalid_frame_types(self):
         with self.assertRaises(ValueError):
             wire.write_frame(self.writer, 10, 1, b'')
+
+    def test_that_construct_start_ok_returns_encoded_value(self):
+        encoded = wire.Connection.construct_start_ok(
+            {'client': 'properties'},
+            'auth mechanism', '\x00name\x00password',
+            'locale',
+        )
+        self.assertEqual(
+            encoded,
+            b'\x00\x0A'
+            b'\x00\x0B'
+            b'\x00\x00\x00\x16'
+            b'\x06clientS\x00\x00\x00\x0Aproperties'
+            b'\x0Eauth mechanism'
+            b'\x00\x00\x00\x0E\x00name\x00password'
+            b'\x06locale'
+        )
