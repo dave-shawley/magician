@@ -138,3 +138,15 @@ class EncodingTests(unittest.TestCase):
     def test_that_encode_table_raises_exception_on_unhandled_types(self):
         with self.assertRaises(ValueError):
             wire.encode_table({'object_value': object()}, self.writer)
+
+    def test_that_write_frame_correctly_encodes_data(self):
+        wire.write_frame(self.writer, 1, 0x1234, b'frame-body-is-opaque')
+        self.assertEqual(self.written[0], 1)
+        self.assertEqual(self.written[1:3], b'\x12\x34')
+        self.assertEqual(self.written[3:7], b'\x00\x00\x00\x14')  # 20 bytes
+        self.assertEqual(self.written[7:-1], b'frame-body-is-opaque')
+        self.assertEqual(self.written[-1], 0xCE)
+
+    def test_that_write_frame_rejects_invalid_frame_types(self):
+        with self.assertRaises(ValueError):
+            wire.write_frame(self.writer, 10, 1, b'')

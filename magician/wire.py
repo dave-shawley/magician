@@ -207,10 +207,11 @@ class Frame(object):
     HEADER = 2
     BODY = 3
     HEARTBEAT = 4
+    FRAME_TYPES = (METHOD, HEADER, BODY, HEARTBEAT)
 
     def __init__(self, frame_type, channel, body):
         super(Frame, self).__init__()
-        if frame_type not in (1, 2, 3, 4):
+        if frame_type not in self.FRAME_TYPES:
             raise errors.ProtocolFailure('invalid frame type ({0}) received',
                                          frame_type)
 
@@ -284,3 +285,25 @@ def read_frame(reader):
                                      channel)
 
     return frame
+
+
+def write_frame(writer, frame_type, channel, frame_body):
+    """
+    Write an AMQP frame on `writer`.
+
+    :param writer: instance to write frame to.  An instance of
+        :class:`asyncio.StreamWriter` or :class:`io.BytesIO` will do
+    :param int frame_type: type of frame to write
+    :param int channel: channel that frame is associated with
+    :param bytes frame_body: body of the frame
+    :raise ValueError: if the frame type is not a valid frame type
+
+    """
+    if frame_type not in Frame.FRAME_TYPES:
+        raise ValueError('Invalid frame type', frame_type)
+
+    LOGGER.debug('writing frame type=%d channel=%d body=%r',
+                 frame_type, channel, frame_body)
+    writer.write(struct.pack('>BHI', frame_type, channel, len(frame_body)))
+    writer.write(frame_body)
+    writer.write(Frame.END_BYTE)
