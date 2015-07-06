@@ -65,12 +65,14 @@ def encode_table(table, buffer):
     Encode a table into a stream.
 
     :param dict table: data to encode into a table
-    :param buffer: a seekable and writeable stream-like object.
-        Something like :class:`io.BytesIO` works well here.
+    :param buffer: a stream-like object. Something like :class:`io.BytesIO`
+        works well here.
     :raises ValueError: if the table cannot be encoded
 
     """
-    assert buffer.seekable()
+    real_buffer = buffer
+    if not buffer.seekable():
+        buffer = io.BytesIO()
     buffer.write(b'\xFE\xED\xFA\xCE')
     start_position = buffer.tell()
     LOGGER.debug('starting table at %d', start_position)
@@ -96,6 +98,9 @@ def encode_table(table, buffer):
     view = buffer.getbuffer()
     view[start_position-4:start_position] = struct.pack('>I', bytes_written)
     del view
+
+    if buffer is not real_buffer:
+        real_buffer.write(buffer.getvalue())
 
 
 def decode_table(data, offset):
