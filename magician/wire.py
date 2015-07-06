@@ -287,6 +287,8 @@ class Connection(object):
 
     - **Connection.Start**: ``version_major``, ``version_minor``,
       ``server_properties``, ``security_mechanisms``, ``locales``
+    - **Connection.Tune**: ``channel_max``, ``frame_max``,
+      ``heartbeat_delay``
 
     """
     CLASS_ID = 10
@@ -295,6 +297,8 @@ class Connection(object):
         """Method constants defined for the AMQP Connection class."""
         START = 10
         START_OK = 11
+        TUNE = 30
+        TUNE_OK = 31
 
     @classmethod
     def from_bytes(cls, data):
@@ -316,6 +320,9 @@ class Connection(object):
             self.security_mechanisms = mechanisms.split()
             locales, offset = decode_long_string(data, offset)
             self.locales = locales.split()
+        elif self.method_id == self.Methods.TUNE:
+            self.channel_max, self.frame_max, self.heartbeat_delay = \
+                struct.unpack('>HIH', data[2:10])
         else:
             raise errors.ProtocolFailure('unknown connection method {0}',
                                          self.method_id)

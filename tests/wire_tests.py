@@ -30,12 +30,19 @@ CONNECTION_START = (
     b'\x00\x00\x00\x0eAMQPLAIN PLAIN'
     b'\x00\x00\x00\x05en_US')
 
+TUNE = (
+    b'\x00\x0a'
+    b'\x00\x1e'
+    b'\x00\x00'
+    b'\x00\x02\x00\x00'
+    b'\x02\x44'
+)
+
 
 class CanonicalFrameDecodingTests(unittest.TestCase):
 
     def test_that_connection_start_frame_decodes(self):
-        view = memoryview(CONNECTION_START)
-        table, offset = wire.decode_table(view, 6)
+        table, offset = wire.decode_table(CONNECTION_START, 6)
         self.assertEqual(offset, 429)
         self.assertEqual(table[b'product'], b'RabbitMQ')
         self.assertEqual(table[b'cluster_name'], b'rabbit@gondolin')
@@ -63,7 +70,7 @@ class FrameTests(unittest.TestCase):
     def test_that_connection_start_frame_decodes(self):
         server_properties, _ = wire.decode_table(CONNECTION_START, 6)
 
-        frame = wire.Frame(1, 0, CONNECTION_START)
+        frame = wire.Frame(wire.Frame.METHOD, 0, CONNECTION_START)
         self.assertEqual(frame.frame_type, wire.Frame.METHOD)
         self.assertEqual(frame.channel, 0)
         self.assertEqual(frame.raw_body, CONNECTION_START)
@@ -75,6 +82,15 @@ class FrameTests(unittest.TestCase):
         self.assertEqual(frame.body.security_mechanisms,
                          [b'AMQPLAIN', b'PLAIN'])
         self.assertEqual(frame.body.locales, [b'en_US'])
+
+    def test_that_connection_tune_decodes(self):
+        frame = wire.Frame(wire.Frame.METHOD, 0, TUNE)
+        self.assertEqual(frame.frame_type, wire.Frame.METHOD)
+        self.assertEqual(frame.channel, 0)
+        self.assertEqual(frame.raw_body, TUNE)
+        self.assertEqual(frame.body.channel_max, 0)
+        self.assertEqual(frame.body.frame_max, 0x20000)
+        self.assertEqual(frame.body.heartbeat_delay, 0x244)
 
 
 class EncodingTests(unittest.TestCase):
