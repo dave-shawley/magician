@@ -1,3 +1,4 @@
+import asyncio
 import io
 import struct
 import unittest
@@ -67,10 +68,22 @@ class CanonicalFrameDecodingTests(unittest.TestCase):
 
 class FrameTests(unittest.TestCase):
 
-    def test_that_connection_start_frame_decodes(self):
-        server_properties, _ = wire.decode_table(CONNECTION_START, 6)
+    def setUp(self):
+        super(FrameTests, self).setUp()
+        self.loop = asyncio.get_event_loop()
 
-        frame = wire.Frame(wire.Frame.METHOD, 0, CONNECTION_START)
+    def process_frame(self, frame_type, channel, frame_body):
+        buffer = io.BytesIO()
+        buffer.write(struct.pack('>BHI', frame_type, channel, len(frame_body)))
+        buffer.write(frame_body)
+        buffer.write(wire.Frame.END_BYTE)
+        reader = AsyncBufferReader(buffer.getvalue())
+        return self.loop.run_until_complete(wire.read_frame(reader))
+
+    def test_that_connection_start_frame_decodes(self):
+        expected_properties, _ = wire.decode_table(CONNECTION_START, 6)
+        frame = self.process_frame(wire.Frame.METHOD, 0, CONNECTION_START)
+
         self.assertEqual(frame.frame_type, wire.Frame.METHOD)
         self.assertEqual(frame.channel, 0)
         self.assertEqual(frame.raw_body, CONNECTION_START)
@@ -78,13 +91,14 @@ class FrameTests(unittest.TestCase):
         self.assertEqual(frame.body.method_id, wire.Connection.Methods.START)
         self.assertEqual(frame.body.version_major, 0)
         self.assertEqual(frame.body.version_minor, 9)
-        self.assertEqual(frame.body.server_properties, server_properties)
+        self.assertEqual(frame.body.server_properties, expected_properties)
         self.assertEqual(frame.body.security_mechanisms,
                          [b'AMQPLAIN', b'PLAIN'])
         self.assertEqual(frame.body.locales, [b'en_US'])
 
     def test_that_connection_tune_decodes(self):
-        frame = wire.Frame(wire.Frame.METHOD, 0, TUNE)
+        frame = self.process_frame(wire.Frame.METHOD, 0, TUNE)
+
         self.assertEqual(frame.frame_type, wire.Frame.METHOD)
         self.assertEqual(frame.channel, 0)
         self.assertEqual(frame.raw_body, TUNE)
@@ -183,3 +197,16 @@ class EncodingTests(unittest.TestCase):
             b'\x00\x00\x00\x0E\x00name\x00password'
             b'\x06locale'
         )
+
+
+class AsyncBufferReader(object):
+    """Simple implementation of asyncio.StreamReader over a buffer."""
+
+    def __init__(self, buffer):
+        super(AsyncBufferReader, self).__init__()
+        self.buffer = buffer
+        self.stream = io.BytesIO(self.buffer)
+
+    @asyncio.coroutine
+    def read(self, num_bytes):
+        return self.stream.read(num_bytes)
