@@ -264,13 +264,13 @@ class Frame(object):
         LOGGER.debug('decoding body %r', body)
 
         if self.frame_type == self.METHOD:
-            self._decode_method()
+            self.body = self._decode_method()
 
     def _decode_method(self):
         view = memoryview(self.raw_body)
         class_id = (view[0] << 8) | view[1]
         if class_id == Connection.CLASS_ID:
-            self.body = Connection.from_bytes(view[2:])
+            return Connection.from_bytes(view[2:])
 
     def __repr__(self):
         return (
