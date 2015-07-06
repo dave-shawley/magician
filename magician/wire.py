@@ -130,8 +130,8 @@ def decode_table(data, offset):
         elif field_type == 't':
             field_value, offset = bool(data[offset]), offset + 1
         else:
-            raise errors.ProtocolFailure('unknown field type {0}',
-                                         field_type)
+            raise errors.ProtocolFailure('unknown field type {0} '
+                                         'at offset {1}', field_type, offset)
         table[field_name] = field_value
     return table, offset
 
@@ -260,7 +260,8 @@ class Frame(object):
         self.frame_type = frame_type
         self.channel = channel
         self.raw_body = body
-        LOGGER.debug('BODY %r', body)
+        self.body = None
+        LOGGER.debug('decoding body %r', body)
 
         if self.frame_type == self.METHOD:
             self._decode_method()
@@ -274,7 +275,7 @@ class Frame(object):
     def __repr__(self):
         return (
             '<magician.wire.Frame: type={0.frame_type} channel={0.channel} '
-            '{1} body bytes>'.format(self, len(self.raw_body)))
+            '{1}>'.format(self, self.body))
 
 
 class Connection(object):
@@ -342,6 +343,10 @@ class Connection(object):
         encode_short_string(locale, writer)
         return writer.getvalue()
 
+    def __str__(self):
+        return ('<magician.wire.Connection: class {0.class_id} '
+                'method {0.method_id}>'.format(self))
+
 
 @asyncio.coroutine
 def read_frame(reader):
@@ -355,6 +360,9 @@ def read_frame(reader):
     """
     frame_header = yield from reader.read(7)
     LOGGER.debug('received frame header %r', frame_header)
+    if not frame_header:
+        LOGGER.info('read empty bytes %s', reader.exception())
+        return None
 
     frame_type, channel, frame_size = struct.unpack('>BHI', frame_header)
     frame_body = yield from reader.read(frame_size)
@@ -367,6 +375,8 @@ def read_frame(reader):
     if frame.frame_type == Frame.HEARTBEAT and frame.channel != 0:
         raise errors.ProtocolFailure('heartbeat received for channel {0}',
                                      channel)
+
+    LOGGER.debug('decoded %s', frame)
 
     return frame
 
