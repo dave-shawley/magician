@@ -222,8 +222,29 @@ class Frame(object):
     :raises: :class:`magician.errors.ProtocolFailure` if the frame
         cannot be decoded
 
+    .. attribute:: frame_type
+
+       The type of AMQP frame that this instance represents.
+
+    .. attribute:: channel
+
+       The channel that this frame is associated with or zero for
+       a connection-level frame.
+
+    .. attribute:: raw_body
+
+       The body as a raw byte array.
+
+    .. attribute:: body
+
+       The body as a decoded object instance such as a :class:`.Connection`
+       instance for a connection-oriented frame.
+
     """
+
     END_BYTE = b'\xCE'
+    """Byte string that terminates every AMQP packet."""
+
     METHOD = 1
     HEADER = 2
     BODY = 3
