@@ -40,32 +40,6 @@ TUNE = (
 )
 
 
-class CanonicalFrameDecodingTests(unittest.TestCase):
-
-    def test_that_connection_start_frame_decodes(self):
-        table, offset = wire.decode_table(CONNECTION_START, 6)
-        self.assertEqual(offset, 429)
-        self.assertEqual(table[b'product'], b'RabbitMQ')
-        self.assertEqual(table[b'cluster_name'], b'rabbit@gondolin')
-        self.assertEqual(table[b'copyright'],
-                         b'Copyright (C) 2007-2014 GoPivotal, Inc.')
-        self.assertEqual(table[b'version'], b'3.4.4')
-        self.assertEqual(table[b'platform'], b'Erlang/OTP')
-        self.assertEqual(table[b'information'],
-                         b'Licensed under the MPL.  '
-                         b'See http://www.rabbitmq.com/')
-        self.assertEqual(table[b'capabilities'], {
-            b'exchange_exchange_bindings': True,
-            b'publisher_confirms': True,
-            b'consumer_cancel_notify': True,
-            b'authentication_failure_close': True,
-            b'consumer_priorities': True,
-            b'connection.blocked': True,
-            b'basic.nack': True,
-            b'per_consumer_qos': True,
-        })
-
-
 class FrameTests(unittest.TestCase):
 
     def setUp(self):
