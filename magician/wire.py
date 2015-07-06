@@ -375,7 +375,7 @@ def read_frame(reader):
     frame_body = yield from reader.read(frame_size)
     frame_end = yield from reader.read(1)
     if frame_end != Frame.END_BYTE:
-        raise errors.ProtocolFailure('invalid frame end ({0:02x}) received',
+        raise errors.ProtocolFailure('invalid frame end ({0!r}) received',
                                      frame_end)
 
     frame = Frame(frame_type, channel, frame_body)

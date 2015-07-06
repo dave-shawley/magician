@@ -3,7 +3,7 @@ import io
 import struct
 import unittest
 
-from magician import wire
+from magician import errors, wire
 
 
 CONNECTION_START = (
@@ -79,6 +79,20 @@ class FrameTests(unittest.TestCase):
         self.assertEqual(frame.body.channel_max, 0)
         self.assertEqual(frame.body.frame_max, 0x20000)
         self.assertEqual(frame.body.heartbeat_delay, 0x244)
+
+    def test_that_missing_frame_end_raises_exception(self):
+        buffer = io.BytesIO()
+        buffer.write(struct.pack('>BHI', wire.Frame.METHOD, 0, len(TUNE)))
+        buffer.write(TUNE)
+        # omitting this: buffer.write(wire.Frame.END_BYTE)
+
+        reader = AsyncBufferReader(buffer.getvalue())
+        with self.assertRaises(errors.ProtocolFailure):
+            self.loop.run_until_complete(wire.read_frame(reader))
+
+    def test_that_heartbeat_on_specific_channel_raises_exception(self):
+        with self.assertRaises(errors.ProtocolFailure):
+            self.process_frame(wire.Frame.HEARTBEAT, 1, b'')
 
 
 class EncodingTests(unittest.TestCase):
