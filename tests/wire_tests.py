@@ -4,41 +4,7 @@ import struct
 import unittest
 
 from magician import errors, wire
-from tests import helpers
-
-
-CONNECTION_START = (
-    b'\x00\x0a'
-    b'\x00\x0a'
-    b'\x00'
-    b'\x09'
-    b'\x00\x00\x01\xa3'
-    b'\x0CcapabilitiesF\x00\x00\x00\xb5'
-    b'\x12publisher_confirmst\x01'
-    b'\x1Aexchange_exchange_bindingst\x01'
-    b'\x0abasic.nackt\x01'
-    b'\x16consumer_cancel_notifyt\x01'
-    b'\x12connection.blockedt\x01'
-    b'\x13consumer_prioritiest\x01'
-    b'\x1Cauthentication_failure_closet\x01'
-    b'\x10per_consumer_qost\x01'
-    b'\x0Ccluster_nameS\x00\x00\x00\x0frabbit@gondolin'
-    b'\x09copyrightS\x00\x00\x00\x27Copyright (C) 2007-2014 GoPivotal, Inc.'
-    b'\x0BinformationS\x00\x00\x00\x35Licensed under the MPL.  See '
-    b'http://www.rabbitmq.com/'
-    b'\x08platformS\x00\x00\x00\x0AErlang/OTP'
-    b'\x07productS\x00\x00\x00\x08RabbitMQ'
-    b'\x07versionS\x00\x00\x00\x053.4.4'
-    b'\x00\x00\x00\x0eAMQPLAIN PLAIN'
-    b'\x00\x00\x00\x05en_US')
-
-TUNE = (
-    b'\x00\x0a'
-    b'\x00\x1e'
-    b'\x00\x00'
-    b'\x00\x02\x00\x00'
-    b'\x02\x44'
-)
+from tests import frames, helpers
 
 
 class FrameTests(unittest.TestCase):
@@ -56,12 +22,13 @@ class FrameTests(unittest.TestCase):
         return self.loop.run_until_complete(wire.read_frame(reader))
 
     def test_that_connection_start_frame_decodes(self):
-        expected_properties, _ = wire.decode_table(CONNECTION_START, 6)
-        frame = self.process_frame(wire.Frame.METHOD, 0, CONNECTION_START)
+        expected_properties, _ = wire.decode_table(frames.CONNECTION_START, 6)
+        frame = self.process_frame(wire.Frame.METHOD, 0,
+                                   frames.CONNECTION_START)
 
         self.assertEqual(frame.frame_type, wire.Frame.METHOD)
         self.assertEqual(frame.channel, 0)
-        self.assertEqual(frame.raw_body, CONNECTION_START)
+        self.assertEqual(frame.raw_body, frames.CONNECTION_START)
         self.assertEqual(frame.body.class_id, wire.Connection.CLASS_ID)
         self.assertEqual(frame.body.method_id, wire.Connection.Methods.START)
         self.assertEqual(frame.body.version_major, 0)
@@ -72,19 +39,20 @@ class FrameTests(unittest.TestCase):
         self.assertEqual(frame.body.locales, [b'en_US'])
 
     def test_that_connection_tune_decodes(self):
-        frame = self.process_frame(wire.Frame.METHOD, 0, TUNE)
+        frame = self.process_frame(wire.Frame.METHOD, 0, frames.TUNE)
 
         self.assertEqual(frame.frame_type, wire.Frame.METHOD)
         self.assertEqual(frame.channel, 0)
-        self.assertEqual(frame.raw_body, TUNE)
+        self.assertEqual(frame.raw_body, frames.TUNE)
         self.assertEqual(frame.body.channel_max, 0)
         self.assertEqual(frame.body.frame_max, 0x20000)
         self.assertEqual(frame.body.heartbeat_delay, 0x244)
 
     def test_that_missing_frame_end_raises_exception(self):
         buffer = io.BytesIO()
-        buffer.write(struct.pack('>BHI', wire.Frame.METHOD, 0, len(TUNE)))
-        buffer.write(TUNE)
+        buffer.write(struct.pack('>BHI', wire.Frame.METHOD, 0,
+                                 len(frames.TUNE)))
+        buffer.write(frames.TUNE)
         # omitting this: buffer.write(wire.Frame.END_BYTE)
 
         reader = helpers.AsyncBufferReader(buffer.getvalue())
