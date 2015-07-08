@@ -4,6 +4,7 @@ import struct
 import unittest
 
 from magician import errors, wire
+from tests import helpers
 
 
 CONNECTION_START = (
@@ -51,7 +52,7 @@ class FrameTests(unittest.TestCase):
         buffer.write(struct.pack('>BHI', frame_type, channel, len(frame_body)))
         buffer.write(frame_body)
         buffer.write(wire.Frame.END_BYTE)
-        reader = AsyncBufferReader(buffer.getvalue())
+        reader = helpers.AsyncBufferReader(buffer.getvalue())
         return self.loop.run_until_complete(wire.read_frame(reader))
 
     def test_that_connection_start_frame_decodes(self):
@@ -86,7 +87,7 @@ class FrameTests(unittest.TestCase):
         buffer.write(TUNE)
         # omitting this: buffer.write(wire.Frame.END_BYTE)
 
-        reader = AsyncBufferReader(buffer.getvalue())
+        reader = helpers.AsyncBufferReader(buffer.getvalue())
         with self.assertRaises(errors.ProtocolFailure):
             self.loop.run_until_complete(wire.read_frame(reader))
 
@@ -185,16 +186,3 @@ class EncodingTests(unittest.TestCase):
             b'\x00\x00\x00\x0E\x00name\x00password'
             b'\x06locale'
         )
-
-
-class AsyncBufferReader(object):
-    """Simple implementation of asyncio.StreamReader over a buffer."""
-
-    def __init__(self, buffer):
-        super(AsyncBufferReader, self).__init__()
-        self.buffer = buffer
-        self.stream = io.BytesIO(self.buffer)
-
-    @asyncio.coroutine
-    def read(self, num_bytes):
-        return self.stream.read(num_bytes)
