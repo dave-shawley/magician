@@ -28,7 +28,6 @@ class FrameTests(unittest.TestCase):
 
         self.assertEqual(frame.frame_type, wire.Frame.METHOD)
         self.assertEqual(frame.channel, 0)
-        self.assertEqual(frame.raw_body, frames.CONNECTION_START)
         self.assertEqual(frame.body.class_id, wire.Connection.CLASS_ID)
         self.assertEqual(frame.body.method_id, wire.Connection.Methods.START)
         self.assertEqual(frame.body.version_major, 0)
@@ -43,7 +42,6 @@ class FrameTests(unittest.TestCase):
 
         self.assertEqual(frame.frame_type, wire.Frame.METHOD)
         self.assertEqual(frame.channel, 0)
-        self.assertEqual(frame.raw_body, frames.TUNE)
         self.assertEqual(frame.body.channel_max, 0)
         self.assertEqual(frame.body.frame_max, 0x20000)
         self.assertEqual(frame.body.heartbeat_delay, 0x244)

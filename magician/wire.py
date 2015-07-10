@@ -169,7 +169,7 @@ def decode_short_string(data, offset):
     """
     string_length = data[offset]
     offset += 1
-    string_data = bytes(data[offset:offset+string_length])
+    string_data = data[offset:offset+string_length]
     return string_data, offset + string_length
 
 
@@ -202,7 +202,7 @@ def decode_long_string(data, offset):
     """
     string_length = struct.unpack('>I', data[offset:offset+4])[0]
     offset += 4
-    string_data = bytes(data[offset:offset+string_length])
+    string_data = data[offset:offset+string_length]
     return string_data, offset + string_length
 
 
@@ -231,10 +231,6 @@ class Frame(object):
        The channel that this frame is associated with or zero for
        a connection-level frame.
 
-    .. attribute:: raw_body
-
-       The body as a raw byte array.
-
     .. attribute:: body
 
        The body as a decoded object instance such as a :class:`.Connection`
@@ -259,15 +255,14 @@ class Frame(object):
 
         self.frame_type = frame_type
         self.channel = channel
-        self.raw_body = body
         self.body = None
         LOGGER.debug('decoding body %r', body)
 
         if self.frame_type == self.METHOD:
-            self.body = self._decode_method()
+            self.body = self._decode_method(body)
 
-    def _decode_method(self):
-        view = memoryview(self.raw_body)
+    def _decode_method(self, body):
+        view = memoryview(body)
         class_id = (view[0] << 8) | view[1]
         if class_id == Connection.CLASS_ID:
             return Connection.from_bytes(view[2:])
@@ -317,9 +312,9 @@ class Connection(object):
             self.version_major, self.version_minor = data[2], data[3]
             self.server_properties, offset = decode_table(data, 4)
             mechanisms, offset = decode_long_string(data, offset)
-            self.security_mechanisms = mechanisms.split()
+            self.security_mechanisms = bytes(mechanisms).split()
             locales, offset = decode_long_string(data, offset)
-            self.locales = locales.split()
+            self.locales = bytes(locales).split()
         elif self.method_id == self.Methods.TUNE:
             self.channel_max, self.frame_max, self.heartbeat_delay = \
                 struct.unpack('>HIH', data[2:10])
