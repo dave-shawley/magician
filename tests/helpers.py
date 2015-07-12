@@ -1,3 +1,4 @@
+from asyncio import base_events
 import asyncio
 import io
 
@@ -21,7 +22,7 @@ class AsyncBufferReader(object):
         pass
 
 
-class FakeEventLoop(asyncio.BaseEventLoop):
+class FakeEventLoop(base_events.BaseEventLoop):
 
     @asyncio.coroutine
     def create_connection(self, protocol_factory, host=None, port=None, *,
