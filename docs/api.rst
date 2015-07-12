@@ -25,6 +25,7 @@ on behind the scenes.
       B ->> P [label="connection_made"];
       P -> B [label="Protocol Header"];
       B => P [label=Connection.Start, return=Connection.StartOK];
+      B => P [label=Connection.Tune, return=Connection.TuneOK];
       C <<- P [label="finish futures['connected']"];
    }
 

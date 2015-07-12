@@ -95,6 +95,15 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
                           self.password[0] + '*****' + self.password[-1])
         frame_data = self._construct_start_ok_frame(frame.body.locales[0])
         wire.write_frame(writer, wire.Frame.METHOD, 0, frame_data)
+        frame = yield from wire.read_frame(self.reader)
+
+        self.logger.debug('issuing TuneOK channel_max=%d, frame_max=%d, '
+                          'heartbeat_delay=%d', frame.body.channel_max,
+                          frame.body.frame_max, frame.body.heartbeat_delay)
+        frame_data = wire.Connection.construct_tune_ok(
+            frame.body.channel_max, frame.body.frame_max,
+            frame.body.heartbeat_delay)
+        wire.write_frame(writer, wire.Frame.METHOD, 0, frame_data)
 
         self.futures['connected'].set_result(True)
 

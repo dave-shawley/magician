@@ -341,6 +341,12 @@ class Connection(object):
         encode_short_string(locale, writer)
         return writer.getvalue()
 
+    @classmethod
+    def construct_tune_ok(cls, channel_max, frame_max, heartbeat_delay):
+        return struct.pack('>HHHIH',
+                           cls.CLASS_ID, cls.Methods.TUNE_OK,
+                           channel_max, frame_max, heartbeat_delay)
+
     def __str__(self):
         return ('<magician.wire.Connection: class {0.class_id} '
                 'method {0.method_id}>'.format(self))
