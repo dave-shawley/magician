@@ -1,15 +1,45 @@
 from asyncio import base_events
 import asyncio
 import io
+import struct
+
+from magician import wire
 
 
 class AsyncBufferReader(object):
     """Simple implementation of asyncio.StreamReader over a buffer."""
 
-    def __init__(self, buffer):
+    def __init__(self):
         super(AsyncBufferReader, self).__init__()
-        self.buffer = buffer
-        self.stream = io.BytesIO(self.buffer)
+        self.stream = io.BytesIO()
+
+    def add_method_frame(self, class_id, method_id, channel, *buffers):
+        """
+        Add a method frame.
+
+        :param int class_id: ID of the class that is being invoked
+        :param int method_id: ID of the method that is being invoked
+        :param int channel: channel that this frame is associated with
+        :param buffers: arbitrary number of byte buffers to append
+
+        """
+        payload_size = sum(len(buffer) for buffer in buffers)
+        iobuf = io.BytesIO()
+        iobuf.write(struct.pack('>BHI', wire.Frame.METHOD, channel,
+                                payload_size + 4))
+        iobuf.write(struct.pack('>HH', class_id, method_id))
+        self.stream.write(iobuf.getvalue())
+        for buf in buffers:
+            self.stream.write(buf)
+        self.stream.write(wire.Frame.END_BYTE)
+
+    def add_buffers(self, *buffers):
+        """Append an arbitrary number of byte buffers to the stream."""
+        for buffer in buffers:
+            self.stream.write(buffer)
+
+    def rewind(self):
+        self.stream.seek(0)
 
     @asyncio.coroutine
     def read(self, num_bytes):

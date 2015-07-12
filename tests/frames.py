@@ -1,8 +1,5 @@
 CONNECTION_START = (
-    b'\x00\x0a'
-    b'\x00\x0a'
-    b'\x00'
-    b'\x09'
+    b'\x00\x09'
     b'\x00\x00\x01\xa3'
     b'\x0CcapabilitiesF\x00\x00\x00\xb5'
     b'\x12publisher_confirmst\x01'
@@ -24,8 +21,6 @@ CONNECTION_START = (
     b'\x00\x00\x00\x05en_US')
 
 TUNE = (
-    b'\x00\x0a'
-    b'\x00\x1e'
     b'\x00\x00'
     b'\x00\x02\x00\x00'
     b'\x02\x44'

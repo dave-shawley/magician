@@ -13,18 +13,25 @@ class FrameTests(unittest.TestCase):
         super(FrameTests, self).setUp()
         self.loop = asyncio.get_event_loop()
 
+    def process_method_frame(self, class_id, method_id, frame_body):
+        reader = helpers.AsyncBufferReader()
+        reader.add_method_frame(class_id, method_id, 0, frame_body)
+        reader.rewind()
+        return self.loop.run_until_complete(wire.read_frame(reader))
+
     def process_frame(self, frame_type, channel, frame_body):
-        buffer = io.BytesIO()
-        buffer.write(struct.pack('>BHI', frame_type, channel, len(frame_body)))
-        buffer.write(frame_body)
-        buffer.write(wire.Frame.END_BYTE)
-        reader = helpers.AsyncBufferReader(buffer.getvalue())
+        reader = helpers.AsyncBufferReader()
+        reader.add_buffers(
+            struct.pack('>BHI', frame_type, channel, len(frame_body)),
+            frame_body)
+        reader.rewind()
         return self.loop.run_until_complete(wire.read_frame(reader))
 
     def test_that_connection_start_frame_decodes(self):
-        expected_properties, _ = wire.decode_table(frames.CONNECTION_START, 6)
-        frame = self.process_frame(wire.Frame.METHOD, 0,
-                                   frames.CONNECTION_START)
+        expected_properties, _ = wire.decode_table(frames.CONNECTION_START, 2)
+        frame = self.process_method_frame(wire.Connection.CLASS_ID,
+                                          wire.Connection.Methods.START,
+                                          frames.CONNECTION_START)
 
         self.assertEqual(frame.frame_type, wire.Frame.METHOD)
         self.assertEqual(frame.channel, 0)
@@ -38,7 +45,9 @@ class FrameTests(unittest.TestCase):
         self.assertEqual(frame.body.locales, [b'en_US'])
 
     def test_that_connection_tune_decodes(self):
-        frame = self.process_frame(wire.Frame.METHOD, 0, frames.TUNE)
+        frame = self.process_method_frame(wire.Connection.CLASS_ID,
+                                          wire.Connection.Methods.TUNE,
+                                          frames.TUNE)
 
         self.assertEqual(frame.frame_type, wire.Frame.METHOD)
         self.assertEqual(frame.channel, 0)
@@ -47,13 +56,12 @@ class FrameTests(unittest.TestCase):
         self.assertEqual(frame.body.heartbeat_delay, 0x244)
 
     def test_that_missing_frame_end_raises_exception(self):
-        buffer = io.BytesIO()
-        buffer.write(struct.pack('>BHI', wire.Frame.METHOD, 0,
-                                 len(frames.TUNE)))
-        buffer.write(frames.TUNE)
-        # omitting this: buffer.write(wire.Frame.END_BYTE)
-
-        reader = helpers.AsyncBufferReader(buffer.getvalue())
+        reader = helpers.AsyncBufferReader()
+        reader.add_buffers(
+            struct.pack('>BHI', wire.Frame.METHOD, 0, len(frames.TUNE)),
+            frames.TUNE)
+        # omitted wire.Frame.END_BYTE
+        reader.rewind()
         with self.assertRaises(errors.ProtocolFailure):
             self.loop.run_until_complete(wire.read_frame(reader))
 
