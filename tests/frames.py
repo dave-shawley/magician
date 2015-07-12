@@ -25,3 +25,7 @@ TUNE = (
     b'\x00\x02\x00\x00'
     b'\x02\x44'
 )
+
+OPEN_OK = (
+    b'\x09localhost'
+)

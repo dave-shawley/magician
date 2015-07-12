@@ -65,8 +65,10 @@ class FakeTransport(asyncio.Transport):
 
     def __init__(self, close_callback, *args):
         super(FakeTransport, self).__init__()
+        self.closed = False
         self.close_callback = close_callback
         self.close_args = args
 
     def close(self):
+        self.closed = True
         self.close_callback(*self.close_args)

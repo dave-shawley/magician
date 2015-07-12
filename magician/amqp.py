@@ -86,6 +86,8 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
 
         self.writer.write(b'AMQP\x00\x00\x09\x01')
         frame = yield from wire.read_frame(self.reader)
+        yield from self._reject_unexpected_frame(
+            frame, wire.Connection.CLASS_ID, wire.Connection.Methods.START)
         if frame.body.version_major != 0 or frame.body.version_minor != 9:
             yield from self._protocol_failure(
                 'unsupported AMQP version {0}.{1}',
@@ -97,6 +99,8 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         frame_data = self._construct_start_ok_frame(frame.body.locales[0])
         wire.write_frame(writer, wire.Frame.METHOD, 0, frame_data)
         frame = yield from wire.read_frame(self.reader)
+        yield from self._reject_unexpected_frame(
+            frame, wire.Connection.CLASS_ID, wire.Connection.Methods.TUNE)
 
         self.logger.debug('issuing TuneOK channel_max=%d, frame_max=%d, '
                           'heartbeat_delay=%d', frame.body.channel_max,
@@ -111,9 +115,14 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         wire.write_frame(writer, wire.Frame.METHOD, 0, frame_data)
 
         frame = yield from wire.read_frame(self.reader)
+        yield from self._reject_unexpected_frame(frame, 10, 41)
+
         self.futures['connected'].set_result(True)
 
     def close(self):
+        if not self.futures['connected'].done():
+            self.futures['connected'].set_exception(
+                RuntimeError('closed before connected'))
         self.transport.close()
 
     def connection_lost(self, exc):
@@ -153,6 +162,15 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         self.close()
         yield from self.wait_closed()
         raise errors.ProtocolFailure('{0}', msg)
+
+    @asyncio.coroutine
+    def _reject_unexpected_frame(self, frame, expected_class, expected_method):
+        if (frame.body.class_id != expected_class or
+                frame.body.method_id != expected_method):
+            yield from self._protocol_failure(
+                'expected frame ({0}, {1}), received ({2}, {3})',
+                expected_class, expected_method,
+                frame.body.class_id, frame.body.method_id)
 
 
 @asyncio.coroutine

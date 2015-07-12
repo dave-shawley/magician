@@ -66,12 +66,23 @@ class ConnectToTests(unittest.TestCase):
 
 
 class ProtocolViolationTests(unittest.TestCase):
+
+    def setUp(self):
+        super(ProtocolViolationTests, self).setUp()
+        self.protocol = amqp.AMQPProtocol()
+        self.transport = helpers.FakeTransport(
+            self.protocol.connection_lost, None)
+        self.protocol.transport = self.transport
+
     def run_connected_to_server(self, reader, writer):
-        proto = amqp.AMQPProtocol()
-        proto.transport = helpers.FakeTransport(proto.connection_lost, None)
         reader.rewind()
-        coro = proto.connected_to_server(reader, writer)
+        coro = self.protocol.connected_to_server(reader, writer)
         asyncio.get_event_loop().run_until_complete(coro)
+
+    def assert_protocol_is_closed(self):
+        self.assertIs(self.transport.closed, True)
+        self.assertTrue(self.protocol.futures['connected'].done())
+        self.assertTrue(self.protocol.futures['closed'].done())
 
     def test_that_protocol_closes_on_server_version_mismatch(self):
         reader = helpers.AsyncBufferReader()
@@ -80,3 +91,40 @@ class ProtocolViolationTests(unittest.TestCase):
                                 b'\x00\x0a', frames.CONNECTION_START[2:])
         with self.assertRaises(errors.ProtocolFailure):
             self.run_connected_to_server(reader, io.BytesIO())
+        self.assert_protocol_is_closed()
+
+    def test_that_protocol_closes_on_missing_start_frame(self):
+        reader = helpers.AsyncBufferReader()
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.TUNE, 0,
+                                frames.TUNE)
+        with self.assertRaises(errors.ProtocolFailure):
+            self.run_connected_to_server(reader, io.BytesIO())
+        self.assert_protocol_is_closed()
+
+    def test_that_protocol_closes_on_missing_tune_frame(self):
+        reader = helpers.AsyncBufferReader()
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.START, 0,
+                                frames.CONNECTION_START)
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.START, 0,
+                                frames.CONNECTION_START)
+        with self.assertRaises(errors.ProtocolFailure):
+            self.run_connected_to_server(reader, io.BytesIO())
+        self.assert_protocol_is_closed()
+
+    def test_that_protocol_closes_on_missing_open_ok_frame(self):
+        reader = helpers.AsyncBufferReader()
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.START, 0,
+                                frames.CONNECTION_START)
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.TUNE, 0,
+                                frames.TUNE)
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.TUNE, 0,
+                                frames.TUNE)
+        with self.assertRaises(errors.ProtocolFailure):
+            self.run_connected_to_server(reader, io.BytesIO())
+        self.assert_protocol_is_closed()
