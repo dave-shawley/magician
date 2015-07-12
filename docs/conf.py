@@ -17,6 +17,7 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx.ext.viewcode',
     'alabaster',
+    'sphinxcontrib.seqdiag',
 ]
 templates_path = []
 source_suffix = '.rst'

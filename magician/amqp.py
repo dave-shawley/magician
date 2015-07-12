@@ -25,6 +25,10 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
     :param str user: user to connect to the AMQP broker with
     :param str password: password to present to the AMQP broker
 
+    You should not need to create instances of this class.  Use
+    :func:`.connect_to` to connect to a AMQP broker and create
+    a bound instance of this class.
+
     .. attribute:: futures
 
        A :class:`dict` containing :class:`asyncio.Future` instances
@@ -145,7 +149,7 @@ def connect_to(amqp_url, loop=None):
     :param asyncio.BaseEventLoop loop: optional event loop to connect
         to the broker with.  If unspecified, the value returned from
         :func:`asyncio.get_event_loop` is used.
-    :return: instance of :class:`.AMQPProtocol`
+    :return: connected protocol instance
     :rtype: :class:`.AMQPProtocol`
 
     .. _AMQP URI Specification: https://www.rabbitmq.com/uri-spec.html
