@@ -12,7 +12,7 @@ import asyncio
 import logging
 import sys
 
-from . import errors, wire, __version__
+from . import errors, utils, wire, __version__
 
 
 LOGGER = logging.getLogger(__name__)
@@ -79,8 +79,9 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         self.logger.debug('server connection established transport=%r,'
                           'reader=%r, writer=%r', self.transport,
                           reader, writer)
-        self.reader = reader
-        self.writer = writer
+        tracer = utils.IOTracer(reader, writer)
+        self.reader = tracer
+        self.writer = tracer
 
         self.writer.write(b'AMQP\x00\x00\x09\x01')
         frame = yield from wire.read_frame(self.reader)

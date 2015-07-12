@@ -42,3 +42,8 @@ Detected Errors
 ---------------
 .. automodule:: magician.errors
    :members:
+
+Utilities
+---------
+.. automodule:: magician.utils
+   :members:

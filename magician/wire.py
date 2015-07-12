@@ -75,7 +75,6 @@ def encode_table(table, buffer):
         buffer = io.BytesIO()
     buffer.write(b'\xFE\xED\xFA\xCE')
     start_position = buffer.tell()
-    LOGGER.debug('starting table at %d', start_position)
     field_names = sorted(table.keys())
     for field_name in field_names:
         field_value = table[field_name]
@@ -94,7 +93,6 @@ def encode_table(table, buffer):
                 type(field_value), field_name))
 
     bytes_written = buffer.tell() - start_position
-    LOGGER.debug('wrote %d bytes', bytes_written)
     view = buffer.getbuffer()
     view[start_position-4:start_position] = struct.pack('>I', bytes_written)
     del view
@@ -256,8 +254,6 @@ class Frame(object):
         self.frame_type = frame_type
         self.channel = channel
         self.body = None
-        LOGGER.debug('decoding body %r', body)
-
         if self.frame_type == self.METHOD:
             self.body = self._decode_method(body)
 
@@ -363,7 +359,7 @@ def read_frame(reader):
     frame_header = yield from reader.read(7)
     LOGGER.debug('received frame header %r', frame_header)
     if not frame_header:
-        LOGGER.info('read empty bytes %s', reader.exception())
+        LOGGER.info('received zero bytes')
         return None
 
     frame_type, channel, frame_size = struct.unpack('>BHI', frame_header)
@@ -398,8 +394,7 @@ def write_frame(writer, frame_type, channel, frame_body):
     if frame_type not in Frame.FRAME_TYPES:
         raise ValueError('Invalid frame type', frame_type)
 
-    LOGGER.debug('writing frame type=%d channel=%d body=%r',
-                 frame_type, channel, frame_body)
+    LOGGER.debug('writing frame type=%d channel=%d', frame_type, channel)
     writer.write(struct.pack('>BHI', frame_type, channel, len(frame_body)))
     writer.write(frame_body)
     writer.write(Frame.END_BYTE)
