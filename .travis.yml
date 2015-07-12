@@ -7,3 +7,4 @@ script:
 - nosetests
 services:
 - rabbitmq
+sudo: required
