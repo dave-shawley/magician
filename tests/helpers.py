@@ -14,6 +14,21 @@ class AsyncBufferReader(object):
     def read(self, num_bytes):
         return self.stream.read(num_bytes)
 
+    def exception(self):
+        return None
+
+    def set_transport(self):
+        pass
+
+
+class FakeEventLoop(asyncio.BaseEventLoop):
+
+    @asyncio.coroutine
+    def create_connection(self, protocol_factory, host=None, port=None, *,
+                          ssl=None, family=0, proto=0, flags=0, sock=None,
+                          local_addr=None, server_hostname=None):
+        return object(), protocol_factory()
+
 
 class FakeTransport(asyncio.Transport):
 
