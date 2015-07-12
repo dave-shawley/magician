@@ -1,8 +1,11 @@
+from urllib import parse
 import asyncio
 import io
 import os
 import struct
 import unittest
+
+import requests
 
 from magician import amqp, errors, wire
 from tests import frames, helpers
@@ -42,3 +45,17 @@ class ConnectToTests(unittest.TestCase):
             'amqp://user%2dname:p%40ss%3aword@rabbit.host.name:36813/%2Fdev',
             loop=helpers.FakeEventLoop())
         self.assertEqual(protocol.virtual_host, '/dev')
+
+    def test_that_protocol_connects_to_server(self):
+        loop = asyncio.get_event_loop()
+        conn = loop.run_until_complete(
+            amqp.connect_to(os.environ['RABBITMQ_URL']))
+
+        rabbit_info = parse.urlsplit(os.environ['RABBITMQ_URL'])
+        sockinfo = conn.transport.get_extra_info('sockname')
+        response = requests.get(
+            'http://{0}:15672/api/connections'.format(rabbit_info.hostname),
+            auth=(conn.user, conn.password))
+        connections = [(conn['peer_host'], conn['peer_port'])
+                       for conn in response.json()]
+        self.assertIn((sockinfo[0], sockinfo[1]), connections)
