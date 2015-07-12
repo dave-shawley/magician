@@ -1,3 +1,4 @@
+import asyncio
 import io
 
 
@@ -12,3 +13,14 @@ class AsyncBufferReader(object):
     @asyncio.coroutine
     def read(self, num_bytes):
         return self.stream.read(num_bytes)
+
+
+class FakeTransport(asyncio.Transport):
+
+    def __init__(self, close_callback, *args):
+        super(FakeTransport, self).__init__()
+        self.close_callback = close_callback
+        self.close_args = args
+
+    def close(self):
+        self.close_callback(*self.close_args)
