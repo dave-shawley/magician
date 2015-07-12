@@ -1,7 +1,9 @@
 from urllib import parse
 import asyncio
 import io
+import logging
 import os
+import socket
 import struct
 import unittest
 
@@ -12,6 +14,25 @@ from tests import frames, helpers
 
 
 os.environ.setdefault('RABBITMQ_URL', 'amqp://localhost')
+_rabbitmq_available = None
+
+
+def rabbitmq_available():
+    global _rabbitmq_available
+
+    if _rabbitmq_available is not None:
+        return _rabbitmq_available
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM,
+                         socket.IPPROTO_TCP)
+    sock.settimeout(0.25)
+    try:
+        sock.connect(('127.0.0.1', 5672))
+        _rabbitmq_available = True
+    except:
+        logging.getLogger(__name__).info('AMQP server is not available')
+        _rabbitmq_available = False
+    return _rabbitmq_available
 
 
 class ConnectToTests(unittest.TestCase):
@@ -46,6 +67,7 @@ class ConnectToTests(unittest.TestCase):
             loop=helpers.FakeEventLoop())
         self.assertEqual(protocol.virtual_host, '/dev')
 
+    @unittest.skipUnless(rabbitmq_available(), 'RabbitMQ server not available')
     def test_that_protocol_connects_to_server(self):
         loop = asyncio.get_event_loop()
         conn = loop.run_until_complete(
