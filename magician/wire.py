@@ -290,6 +290,8 @@ class Connection(object):
         START_OK = 11
         TUNE = 30
         TUNE_OK = 31
+        OPEN = 40
+        OPEN_OK = 41
 
     @classmethod
     def from_bytes(cls, data):
@@ -314,6 +316,8 @@ class Connection(object):
         elif self.method_id == self.Methods.TUNE:
             self.channel_max, self.frame_max, self.heartbeat_delay = \
                 struct.unpack('>HIH', data[2:10])
+        elif self.method_id == self.Methods.OPEN_OK:
+            self.known_hosts = decode_short_string(data, 2)
         else:
             raise errors.ProtocolFailure('unknown connection method {0}',
                                          self.method_id)
@@ -346,6 +350,13 @@ class Connection(object):
         return struct.pack('>HHHIH',
                            cls.CLASS_ID, cls.Methods.TUNE_OK,
                            channel_max, frame_max, heartbeat_delay)
+
+    @classmethod
+    def construct_open(cls, virtual_host):
+        return struct.pack('>HHBsBB',
+                           cls.CLASS_ID, cls.Methods.OPEN,
+                           len(virtual_host), virtual_host.encode('utf-8'),
+                           0, 0)
 
     def __str__(self):
         return ('<magician.wire.Connection: class {0.class_id} '

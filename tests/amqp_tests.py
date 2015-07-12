@@ -36,3 +36,9 @@ class ConnectToTests(unittest.TestCase):
             loop=helpers.FakeEventLoop())
         self.assertEqual(protocol.user, 'user-name')
         self.assertEqual(protocol.password, 'p@ss:word')
+
+    def test_that_connect_to_passes_virtual_host_to_protocol(self):
+        _, protocol = yield amqp.connect_to(
+            'amqp://user%2dname:p%40ss%3aword@rabbit.host.name:36813/%2Fdev',
+            loop=helpers.FakeEventLoop())
+        self.assertEqual(protocol.virtual_host, '/dev')

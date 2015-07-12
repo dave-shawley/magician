@@ -40,12 +40,13 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
 
     """
 
-    def __init__(self, user=None, password=None):
+    def __init__(self, user=None, password=None, virtual_host=None):
         self.logger = LOGGER.getChild('AMQPProtocol')
         super(AMQPProtocol, self).__init__(asyncio.StreamReader(),
                                            self.connected_to_server)
         self.user = user or 'guest'
         self.password = password or 'guest'
+        self.virtual_host = virtual_host or '/'
         self.reader = None
         self.writer = None
         self.transport = None
@@ -105,6 +106,11 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
             frame.body.heartbeat_delay)
         wire.write_frame(writer, wire.Frame.METHOD, 0, frame_data)
 
+        self.logger.debug('connecting to virtual host %s', self.virtual_host)
+        frame_data = wire.Connection.construct_open(self.virtual_host)
+        wire.write_frame(writer, wire.Frame.METHOD, 0, frame_data)
+
+        frame = yield from wire.read_frame(self.reader)
         self.futures['connected'].set_result(True)
 
     def close(self):
@@ -168,7 +174,7 @@ def connect_to(amqp_url, loop=None):
     parsed = parse.urlsplit(amqp_url)
 
     def create_protocol():
-        return AMQPProtocol(parsed.username, parsed.password)
+        return AMQPProtocol(parsed.username, parsed.password, parsed.path)
 
     loop = loop or asyncio.get_event_loop()
     transport, protocol = yield from loop.create_connection(
