@@ -128,3 +128,42 @@ class ProtocolViolationTests(unittest.TestCase):
         with self.assertRaises(errors.ProtocolFailure):
             self.run_connected_to_server(reader, io.BytesIO())
         self.assert_protocol_is_closed()
+
+
+class ProtocolAuthenticationTests(unittest.TestCase):
+
+    def setUp(self):
+        super(ProtocolAuthenticationTests, self).setUp()
+        self.protocol = amqp.AMQPProtocol()
+        self.transport = helpers.FakeTransport(
+            self.protocol.connection_lost, None)
+        self.protocol.transport = self.transport
+
+    def run_connected_to_server(self, reader, writer):
+        reader.rewind()
+        coro = self.protocol.connected_to_server(reader, writer)
+        asyncio.get_event_loop().run_until_complete(coro)
+
+    def test_that_default_auth_is_plain(self):
+        reader = helpers.AsyncBufferReader()
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.START, 0,
+                                frames.CONNECTION_START)
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.TUNE, 0,
+                                frames.TUNE)
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.OPEN_OK, 0,
+                                frames.OPEN_OK)
+
+        writer = helpers.FrameReceiver()
+        self.run_connected_to_server(reader, writer)
+        self.assertEqual(writer.frames[0]['body'].method_id,
+                         wire.Connection.Methods.START_OK)
+
+        data = writer.frames[0]['body'].method_body
+        _, offset = wire.decode_table(data, 0)
+        auth_mechanism, offset = wire.decode_short_string(data, offset)
+        auth_value, _ = wire.decode_long_string(data, offset)
+        self.assertEqual(auth_mechanism, b'PLAIN')
+        self.assertEqual(auth_value, b'\x00guest\x00guest')

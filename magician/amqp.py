@@ -16,6 +16,16 @@ from . import errors, utils, wire, __version__
 
 
 LOGGER = logging.getLogger(__name__)
+DEFAULT_CLIENT_PROPERTIES = {
+    'product': 'magician',
+    'version': __version__,
+    'platform': '{0} {1}'.format(
+        sys.implementation.name,
+        '.'.join(str(v) for v in sys.implementation.version[0:3])),
+    'copyright': '2015 (c) Dave Shawley',
+    'information': 'Quick, dirty, and native Python client',
+    'capabilities': {},
+}
 
 
 class AMQPProtocol(asyncio.StreamReaderProtocol):
@@ -44,6 +54,7 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         self.logger = LOGGER.getChild('AMQPProtocol')
         super(AMQPProtocol, self).__init__(asyncio.StreamReader(),
                                            self.connected_to_server)
+        self.client_properties = DEFAULT_CLIENT_PROPERTIES.copy()
         self.user = user or 'guest'
         self.password = password or 'guest'
         self.virtual_host = virtual_host or '/'
@@ -93,14 +104,8 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
                 'unsupported AMQP version {0}.{1}',
                 frame.body.version_major, frame.body.version_minor)
 
-        self.logger.debug('authenticating as %s with password %s',
-                          self.user,
-                          self.password[0] + '*****' + self.password[-1])
-        frame_data = self._construct_start_ok_frame(frame.body.locales[0])
-        wire.write_frame(writer, wire.Frame.METHOD, 0, frame_data)
-        frame = yield from wire.read_frame(self.reader)
-        yield from self._reject_unexpected_frame(
-            frame, wire.Connection.CLASS_ID, wire.Connection.Methods.TUNE)
+        frame = yield from self._authenticate(frame.body.security_mechanisms,
+                                              frame.body.locales[0])
 
         self.logger.debug('issuing TuneOK channel_max=%d, frame_max=%d, '
                           'heartbeat_delay=%d', frame.body.channel_max,
@@ -108,11 +113,11 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         frame_data = wire.Connection.construct_tune_ok(
             frame.body.channel_max, frame.body.frame_max,
             frame.body.heartbeat_delay)
-        wire.write_frame(writer, wire.Frame.METHOD, 0, frame_data)
+        wire.write_frame(self.writer, wire.Frame.METHOD, 0, frame_data)
 
         self.logger.debug('connecting to virtual host %s', self.virtual_host)
         frame_data = wire.Connection.construct_open(self.virtual_host)
-        wire.write_frame(writer, wire.Frame.METHOD, 0, frame_data)
+        wire.write_frame(self.writer, wire.Frame.METHOD, 0, frame_data)
 
         frame = yield from wire.read_frame(self.reader)
         yield from self._reject_unexpected_frame(frame, 10, 41)
@@ -139,21 +144,27 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
     def consume_from(self, queue_name, callback):
         pass
 
-    def _construct_start_ok_frame(self, locale):
-        return wire.Connection.construct_start_ok(
-            {
-                'product': 'magician',
-                'version': __version__,
-                'platform': '{0} {1}'.format(
-                    sys.implementation.name,
-                    '.'.join(str(v) for v in sys.implementation.version[0:3])),
-                'copyright': '2015 (c) Dave Shawley',
-                'information': 'Quick and dirty raw python client',
-                'capabilities': {},
-            },
-            'PLAIN', '\x00{0}\x00{1}'.format(self.user, self.password),
-            locale,
-        )
+    @asyncio.coroutine
+    def _authenticate(self, security_mechanisms, locale):
+        self.logger.debug('authenticating as %s with password %s', self.user,
+                          self.password[0] + '*****' + self.password[-1])
+        security_mechanism = 'PLAIN'
+        security_payload = '\x00{0}\x00{1}'.format(self.user,
+                                                   self.password)
+        expected = wire.Connection.Methods.TUNE
+
+        self.logger.debug('selected %s from %s', security_mechanism,
+                          security_mechanisms)
+        wire.write_frame(
+            self.writer, wire.Frame.METHOD, 0,
+            wire.Connection.construct_start_ok(self.client_properties,
+                                               security_mechanism,
+                                               security_payload, locale))
+        frame = yield from wire.read_frame(self.reader)
+        yield from self._reject_unexpected_frame(frame,
+                                                 wire.Connection.CLASS_ID,
+                                                 expected)
+        return frame
 
     @asyncio.coroutine
     def _protocol_failure(self, msg_format, *args):
