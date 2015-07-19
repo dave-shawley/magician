@@ -278,8 +278,10 @@ class Connection(object):
 
     - **Connection.Start**: ``version_major``, ``version_minor``,
       ``server_properties``, ``security_mechanisms``, ``locales``
+    - **Connection.Secure**: ``challenge``
     - **Connection.Tune**: ``channel_max``, ``frame_max``,
       ``heartbeat_delay``
+    - **Connection.OpenOK**: ``known_hosts``
 
     """
     CLASS_ID = 10
@@ -288,6 +290,8 @@ class Connection(object):
         """Method constants defined for the AMQP Connection class."""
         START = 10
         START_OK = 11
+        SECURE = 20
+        SECURE_OK = 21
         TUNE = 30
         TUNE_OK = 31
         OPEN = 40
@@ -313,6 +317,8 @@ class Connection(object):
             self.security_mechanisms = bytes(mechanisms).split()
             locales, offset = decode_long_string(data, offset)
             self.locales = bytes(locales).split()
+        elif self.method_id == self.Methods.SECURE:
+            self.challenge, _ = decode_long_string(data, 2)
         elif self.method_id == self.Methods.TUNE:
             self.channel_max, self.frame_max, self.heartbeat_delay = \
                 struct.unpack('>HIH', data[2:10])
@@ -357,6 +363,13 @@ class Connection(object):
                            cls.CLASS_ID, cls.Methods.OPEN,
                            len(virtual_host), virtual_host.encode('utf-8'),
                            0, 0)
+
+    @classmethod
+    def construct_secure_ok(cls, response):
+        writer = io.BytesIO()
+        writer.write(struct.pack('>HH', cls.CLASS_ID, cls.Methods.SECURE_OK))
+        encode_long_string(response, writer)
+        return writer.getvalue()
 
     def __str__(self):
         return ('<magician.wire.Connection: class {0.class_id} '

@@ -167,3 +167,38 @@ class ProtocolAuthenticationTests(unittest.TestCase):
         auth_value, _ = wire.decode_long_string(data, offset)
         self.assertEqual(auth_mechanism, b'PLAIN')
         self.assertEqual(auth_value, b'\x00guest\x00guest')
+
+    def test_that_scram_md5_is_used_if_available(self):
+        frame_data = bytearray(frames.CONNECTION_START)
+        frame_data[-27:] = (b'\x00\x00\x00\x0ePLAIN CRAM-MD5' +
+                            b'\x00\x00\x00\x05en_US')
+        reader = helpers.AsyncBufferReader()
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.START, 0,
+                                frame_data)
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.SECURE, 0,
+                                frames.SECURE)
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.TUNE, 0,
+                                frames.TUNE)
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.OPEN_OK, 0,
+                                frames.OPEN_OK)
+
+        writer = helpers.FrameReceiver()
+        self.run_connected_to_server(reader, writer)
+        self.assertEqual(writer.frames[0]['body'].method_id,
+                         wire.Connection.Methods.START_OK)
+        data = writer.frames[0]['body'].method_body
+        _, offset = wire.decode_table(data, 0)
+        auth_mechanism, offset = wire.decode_short_string(data, offset)
+        auth_value, _ = wire.decode_long_string(data, offset)
+        self.assertEqual(auth_mechanism, b'CRAM-MD5')
+        self.assertEqual(auth_value, b'')
+
+        self.assertEqual(writer.frames[1]['body'].method_id,
+                         wire.Connection.Methods.SECURE_OK)
+        data = writer.frames[1]['body'].method_body
+        response, _ = wire.decode_long_string(data, 0)
+        self.assertEqual(response, b'guest cd9f33372ef70fdd8fe495fe61446cf2')
