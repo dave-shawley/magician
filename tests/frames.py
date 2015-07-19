@@ -20,6 +20,11 @@ CONNECTION_START = (
     b'\x00\x00\x00\x0eAMQPLAIN PLAIN'
     b'\x00\x00\x00\x05en_US')
 
+SECURE = (
+    b'\x00\x00\x00\x2d'
+    b'<7643773309938837989.1437334139162@localhost>'
+)
+
 TUNE = (
     b'\x00\x00'
     b'\x00\x02\x00\x00'
