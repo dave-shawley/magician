@@ -264,3 +264,4 @@ class HeartbeatTests(unittest.TestCase):
         self.loop.call_later(0.1, self.transport.close)
         self.loop.run_until_complete(self.protocol.wait_closed())
         self.assertFalse(self.protocol._ecg.scheduled)
+        self.assertTrue(self.protocol.futures['receiver'].done())
