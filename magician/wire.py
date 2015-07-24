@@ -242,7 +242,7 @@ class Frame(object):
     METHOD = 1
     HEADER = 2
     BODY = 3
-    HEARTBEAT = 4
+    HEARTBEAT = 8
     FRAME_TYPES = (METHOD, HEADER, BODY, HEARTBEAT)
 
     def __init__(self, frame_type, channel, body):
@@ -256,12 +256,17 @@ class Frame(object):
         self.body = None
         if self.frame_type == self.METHOD:
             self.body = self._decode_method(body)
+        if self.frame_type == self.HEARTBEAT:
+            self.body = self._decode_heartbeat(body)
 
     def _decode_method(self, body):
         view = memoryview(body)
         class_id = (view[0] << 8) | view[1]
         if class_id == Connection.CLASS_ID:
             return Connection.from_bytes(view[2:])
+
+    def _decode_heartbeat(self, body):
+        return
 
     def __repr__(self):
         return (

@@ -52,10 +52,12 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
 
     """
 
-    def __init__(self, user=None, password=None, virtual_host=None):
+    def __init__(self, user=None, password=None, virtual_host=None,
+                 loop=None):
         self.logger = LOGGER.getChild('AMQPProtocol')
+        self.loop = loop or asyncio.get_event_loop()
         super(AMQPProtocol, self).__init__(asyncio.StreamReader(),
-                                           self.connected_to_server)
+                                           self.connected_to_server, loop)
         self.client_properties = DEFAULT_CLIENT_PROPERTIES.copy()
         self.user = user or 'guest'
         self.password = password or 'guest'
@@ -67,6 +69,7 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
             'connected': asyncio.Future(),
             'closed': asyncio.Future(),
         }
+        self._ecg = _HeartMonitor(self.loop.time)
 
     def connection_made(self, transport):
         """Extended to save the transport for future use."""
@@ -112,10 +115,17 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         self.logger.debug('issuing TuneOK channel_max=%d, frame_max=%d, '
                           'heartbeat_delay=%d', frame.body.channel_max,
                           frame.body.frame_max, frame.body.heartbeat_delay)
+        self._ecg.frequency = frame.body.heartbeat_delay
         frame_data = wire.Connection.construct_tune_ok(
-            frame.body.channel_max, frame.body.frame_max,
-            frame.body.heartbeat_delay)
+            frame.body.channel_max, frame.body.frame_max, self._ecg.frequency)
         wire.write_frame(self.writer, wire.Frame.METHOD, 0, frame_data)
+
+        if self._ecg.enabled:
+            self.logger.debug('enabling heartbeats every %fs',
+                              self._ecg.frequency)
+            self._ecg.schedule(self.loop, self._maybe_send_heartbeat)
+        else:
+            self.logger.debug('heartbeats are disabled')
 
         self.logger.debug('connecting to virtual host %s', self.virtual_host)
         frame_data = wire.Connection.construct_open(self.virtual_host)
@@ -132,12 +142,22 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
                 RuntimeError('closed before connected'))
         self.transport.close()
 
+    @property
+    def is_active(self):
+        """Is this instance active? (i.e, not closed)"""
+        return (self.futures['connected'].done() and
+                not self.futures['closed'].done())
+
     def connection_lost(self, exc):
         self.logger.info('connection lost exception is %r', exc)
-        if exc:
-            self.futures['closed'].set_exception(exc)
-        else:
-            self.futures['closed'].set_result(True)
+        self._ecg.cancel()
+
+
+        if not self.futures['closed'].done():
+            if exc:
+                self.futures['closed'].set_exception(exc)
+            else:
+                self.futures['closed'].set_result(True)
 
     @asyncio.coroutine
     def wait_closed(self):
@@ -206,6 +226,13 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
                 expected_class, expected_method,
                 frame.body.class_id, frame.body.method_id)
 
+    def _maybe_send_heartbeat(self):
+        if self._ecg.heartbeat_due:
+            self.logger.debug('sending heartbeat')
+            wire.write_frame(self.writer, wire.Frame.HEARTBEAT, 0, b'')
+            self._ecg.heartbeat_sent()
+        self._ecg.schedule(self.loop, self._maybe_send_heartbeat)
+
 
 @asyncio.coroutine
 def connect_to(amqp_url, loop=None):
@@ -224,14 +251,78 @@ def connect_to(amqp_url, loop=None):
 
     """
     parsed = parse.urlsplit(amqp_url)
+    loop = loop or asyncio.get_event_loop()
 
     def create_protocol():
-        return AMQPProtocol(parsed.username, parsed.password, parsed.path)
+        return AMQPProtocol(parsed.username, parsed.password,
+                            parsed.path, loop)
 
-    loop = loop or asyncio.get_event_loop()
     transport, protocol = yield from loop.create_connection(
         create_protocol, host=parsed.hostname, port=parsed.port or 5672)
 
     yield from protocol.futures['connected']
 
     return protocol
+
+
+class _HeartMonitor(object):
+    """
+    Monitors AMQP connection heartbeating
+
+    :param callable time_function: returns the current time in the same
+        scale as necessary for scheduling
+
+    """
+
+    def __init__(self, time_function):
+        self.time_function = time_function
+        self._frequency = None
+        self._handle = None
+        self.next_heartbeat = 0
+
+    def schedule(self, loop, function):
+        """
+        Schedule a call to `function` on the next heartbeat.
+
+        :param asyncio.AbstractEventLoop loop: loop to schedule the
+            call to `function` on
+        :param callable function: callable to schedule
+
+        """
+        self._handle = loop.call_at(self.next_heartbeat, function)
+
+    def cancel(self):
+        """Cancels the last scheduled heartbeat call"""
+        if self.scheduled:
+            LOGGER.debug('cancelling heartbeat')
+            self._handle.cancel()
+            self._handle = None
+
+    @property
+    def enabled(self):
+        """Are heartbeats enabled?"""
+        return bool(self._frequency)
+
+    @property
+    def scheduled(self):
+        """Is there a heartbeat scheduled?"""
+        return self._handle is not None
+
+    @property
+    def frequency(self):
+        """How frequently are heartbeats required?"""
+        return self._frequency
+
+    @frequency.setter
+    def frequency(self, frequency):
+        self._frequency = frequency
+        self.next_expected = self.time_function() + self._frequency
+
+    @property
+    def heartbeat_due(self):
+        """Is a heartbeat required?"""
+        return self.time_function() > self.next_heartbeat
+
+    def heartbeat_sent(self):
+        """Reset the next required heartbeat timer."""
+        self.next_heartbeat = self.time_function() + self.frequency

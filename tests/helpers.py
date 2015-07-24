@@ -14,9 +14,12 @@ class Prototype(object):
 class AsyncBufferReader(object):
     """Simple implementation of asyncio.StreamReader over a buffer."""
 
-    def __init__(self):
+    def __init__(self, emulate_eof=False):
         super(AsyncBufferReader, self).__init__()
         self.stream = io.BytesIO()
+        self._max_size = 0
+        self._emulate_eof = emulate_eof
+        self._heartbeat_frame = b'\x08\x00\x00\x00\x00\xCE'
 
     def add_method_frame(self, class_id, method_id, channel, *buffers):
         """
@@ -34,27 +37,34 @@ class AsyncBufferReader(object):
                                 payload_size + 4))
         iobuf.write(struct.pack('>HH', class_id, method_id))
         self.stream.write(iobuf.getvalue())
-        for buf in buffers:
-            self.stream.write(buf)
+        self.add_buffers(*buffers)
         self.stream.write(wire.Frame.END_BYTE)
+        self._max_size = max(self.stream.tell(), self._max_size)
 
     def add_buffers(self, *buffers):
         """Append an arbitrary number of byte buffers to the stream."""
         for buffer in buffers:
             self.stream.write(buffer)
+        self._max_size = max(self.stream.tell(), self._max_size)
 
     def rewind(self):
         self.stream.seek(0)
 
     @asyncio.coroutine
     def read(self, num_bytes):
-        return self.stream.read(num_bytes)
+        buf = self.stream.read(num_bytes)
+        if not buf and not self._emulate_eof:
+            return self._heartbeat_frame
+        return buf
 
     def exception(self):
         return None
 
     def set_transport(self):
         pass
+
+    def at_eof(self):
+        return self._emulate_eof and self.stream.tell() == self._max_size
 
 
 class FakeEventLoop(base_events.BaseEventLoop):
