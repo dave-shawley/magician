@@ -292,6 +292,8 @@ class Connection(object):
     - **Connection.Tune**: ``channel_max``, ``frame_max``,
       ``heartbeat_delay``
     - **Connection.OpenOK**: ``known_hosts``
+    - **Connection.Close**: ``code``, ``text``, ``failing_class_id``,
+      ``failing_method_id``
 
     """
     CLASS_ID = 10
@@ -302,6 +304,7 @@ class Connection(object):
         SECURE, SECURE_OK = 20, 21
         TUNE, TUNE_OK = 30, 31
         OPEN, OPEN_OK = 40, 41
+        CLOSE, CLOSE_OK = 50, 51
         names = {
             START: 'start',
             START_OK: 'start_ok',
@@ -311,6 +314,8 @@ class Connection(object):
             TUNE_OK: 'tune_ok',
             OPEN: 'open',
             OPEN_OK: 'open_ok',
+            CLOSE: 'close',
+            CLOSE_OK: 'close_ok',
         }
 
         @classmethod
@@ -345,6 +350,11 @@ class Connection(object):
                 struct.unpack('>HIH', data[2:10])
         elif self.method_id == self.Methods.OPEN_OK:
             self.known_hosts = decode_short_string(data, 2)
+        elif self.method_id == self.Methods.CLOSE:
+            self.code = (data[2] << 8) | data[3]
+            self.text, offset = decode_short_string(data, 4)
+            self.failing_class_id, self.failing_method_id = struct.unpack(
+                '>HH', data[offset:])
         else:
             raise errors.ProtocolFailure('unknown connection method {0}',
                                          self.Methods.name(self.method_id))

@@ -71,6 +71,7 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
             'receiver': None,
         }
         self._ecg = None
+        self._closing = False
 
     def connection_made(self, transport):
         """Extended to save the transport for future use."""
@@ -134,11 +135,12 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         self.futures['connected'].set_result(True)
 
         future = self.loop.create_task(wire.read_frame(self.reader))
-        future.add_done_callback(self._process_frame)
+        future.add_done_callback(self._handle_unsolicited_frame)
         self.futures['receiver'] = future
 
     def close(self):
         self.logger.info('closing connection')
+        self._closing = True
         if not self.futures['connected'].done():
             self.futures['connected'].set_exception(
                 RuntimeError('closed before connected'))
@@ -151,7 +153,11 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
                 not self.futures['closed'].done())
 
     def connection_lost(self, exc):
-        self.logger.info('connection lost exception is %r', exc)
+        if not self._closing:
+            self.logger.error('connection lost exception=%r', exc)
+        else:
+            self.logger.info('connection lost')
+
         if self._ecg:
             self._ecg.cancel()
         if self.futures['receiver'] and not self.futures['receiver'].done():
@@ -231,16 +237,15 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
                 expected_class, expected_method,
                 frame.body.class_id, frame.body.method_id)
 
-    def _process_frame(self, future):
+    def _handle_unsolicited_frame(self, future):
         self._ecg.heartbeat_received()
         if future.cancelled():
             self.logger.info('frame processing cancelled')
         elif future.exception():
-            pass
+            self.logger.exception('exception when decoding unsolicited frame')
         else:
+            need_another_frame = True
             frame = future.result()
-            self.logger.info('result is %r', frame)
-
             if frame is None:
                 if self.reader.at_eof():
                     self.logger.warning('EOF received while reading')
@@ -248,15 +253,39 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
                     return
 
                 self.logger.warning('empty frame received')
+            else:
+                need_another_frame = self._process_frame(frame)
 
-            self.logger.debug('scheduling next frame read')
-            future = self.loop.create_task(wire.read_frame(self.reader))
-            future.add_done_callback(self._process_frame)
-            self.futures['receiver'] = future
+            if need_another_frame:
+                self.logger.debug('scheduling next frame read')
+                future = self.loop.create_task(wire.read_frame(self.reader))
+                future.add_done_callback(self._handle_unsolicited_frame)
+                self.futures['receiver'] = future
+
+    def _process_frame(self, frame):
+        """Process `frame` and decide whether we need to read or not."""
+        self.logger.debug('processing %r', frame)
+        if frame.frame_type == wire.Frame.METHOD:
+            if frame.body.class_id == wire.Connection.CLASS_ID:
+                if frame.body.method_id == wire.Connection.Methods.CLOSE:
+                    if not self._closing:
+                        self.logger.debug('sending close-ok')
+                        wire.write_frame(self.writer, wire.Frame.METHOD,
+                                         0, b'\x00\x0a\x00\x33')
+                        self._closing = True
+                        return False
+
+                elif frame.body.method_id == wire.Connection.Methods.CLOSE_OK:
+                    pass
+
+        return True
 
     def _send_heartbeat(self):
-        self.logger.debug('sending heartbeat')
-        wire.write_frame(self.writer, wire.Frame.HEARTBEAT, 0, b'')
+        if self._closing:
+            self.logger.debug('close in process, skipping heartbeat')
+        else:
+            self.logger.debug('sending heartbeat')
+            wire.write_frame(self.writer, wire.Frame.HEARTBEAT, 0, b'')
 
 
 @asyncio.coroutine

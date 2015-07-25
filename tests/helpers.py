@@ -96,15 +96,29 @@ class FrameReceiver(object):
         super(FrameReceiver, self).__init__()
         self._buffer = io.BytesIO()
         self._frames = []
+        self.frame_available = asyncio.Future()
 
     def write(self, buffer):
         self._buffer.write(buffer)
+        if wire.Frame.END_BYTE in buffer:
+            if not self.frame_available.done():
+                self.frame_available.set_result(True)
+
+    def clear(self):
+        if not self.frame_available.done():
+            self.frame_available.cancel()
+        self.frame_available = asyncio.Future()
+        self._buffer.seek(0)
+        self._buffer.truncate(0)
 
     @property
     def frames(self):
         """List of decoded frames."""
         if self._buffer.tell() != 0:
             self._decode_frames()
+            if not self.frame_available.done():
+                self.frame_available.set_result(True)
+                self.frame_available = asyncio.Future()
         return self._frames
 
     def _decode_frames(self):
