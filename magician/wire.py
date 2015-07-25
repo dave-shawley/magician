@@ -243,7 +243,12 @@ class Frame(object):
     HEADER = 2
     BODY = 3
     HEARTBEAT = 8
-    FRAME_TYPES = (METHOD, HEADER, BODY, HEARTBEAT)
+    FRAME_TYPES = {
+        METHOD: 'method',
+        HEADER: 'header',
+        BODY: 'body',
+        HEARTBEAT: 'heartbeat',
+    }
 
     def __init__(self, frame_type, channel, body):
         super(Frame, self).__init__()
@@ -269,9 +274,9 @@ class Frame(object):
         return
 
     def __repr__(self):
-        return (
-            '<magician.wire.Frame: type={0.frame_type} channel={0.channel} '
-            '{1}>'.format(self, self.body))
+        label = self.FRAME_TYPES.get(self.frame_type, self.frame_type)
+        return ('<{0}: type={1} channel={2} body={3}>'.format(
+            self.__class__.__name__, label, self.channel, self.body))
 
 
 class Connection(object):
@@ -293,14 +298,24 @@ class Connection(object):
 
     class Methods(object):
         """Method constants defined for the AMQP Connection class."""
-        START = 10
-        START_OK = 11
-        SECURE = 20
-        SECURE_OK = 21
-        TUNE = 30
-        TUNE_OK = 31
-        OPEN = 40
-        OPEN_OK = 41
+        START, START_OK = 10, 11
+        SECURE, SECURE_OK = 20, 21
+        TUNE, TUNE_OK = 30, 31
+        OPEN, OPEN_OK = 40, 41
+        names = {
+            START: 'start',
+            START_OK: 'start_ok',
+            SECURE: 'secure',
+            SECURE_OK: 'secure_ok',
+            TUNE: 'tune',
+            TUNE_OK: 'tune_ok',
+            OPEN: 'open',
+            OPEN_OK: 'open_ok',
+        }
+
+        @classmethod
+        def name(cls, value):
+            return cls.names.get(value, value)
 
     @classmethod
     def from_bytes(cls, data):
@@ -315,6 +330,7 @@ class Connection(object):
         self = cls()
         self.class_id = cls.CLASS_ID
         self.method_id = (data[0] << 8) | data[1]
+
         if self.method_id == self.Methods.START:
             self.version_major, self.version_minor = data[2], data[3]
             self.server_properties, offset = decode_table(data, 4)
@@ -331,7 +347,7 @@ class Connection(object):
             self.known_hosts = decode_short_string(data, 2)
         else:
             raise errors.ProtocolFailure('unknown connection method {0}',
-                                         self.method_id)
+                                         self.Methods.name(self.method_id))
         return self
 
     @classmethod
@@ -377,8 +393,7 @@ class Connection(object):
         return writer.getvalue()
 
     def __str__(self):
-        return ('<magician.wire.Connection: class {0.class_id} '
-                'method {0.method_id}>'.format(self))
+        return '<Connection.{0}>'.format(self.Methods.name(self.method_id))
 
 
 @asyncio.coroutine
