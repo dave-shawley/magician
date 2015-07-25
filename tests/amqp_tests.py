@@ -4,6 +4,7 @@ import io
 import logging
 import os
 import socket
+import struct
 import unittest
 
 import requests
@@ -63,6 +64,9 @@ class ConnectToTests(unittest.TestCase):
         connections = [(conn_info['peer_host'], conn_info['peer_port'])
                        for conn_info in response.json()]
         self.assertIn((sockinfo[0], sockinfo[1]), connections)
+
+        conn.close()
+        loop.run_until_complete(conn.wait_closed())
 
 
 class ProtocolViolationTests(unittest.TestCase):
@@ -202,3 +206,60 @@ class ProtocolAuthenticationTests(unittest.TestCase):
         data = writer.frames[1]['body'].method_body
         response, _ = wire.decode_long_string(data, 0)
         self.assertEqual(response, b'guest cd9f33372ef70fdd8fe495fe61446cf2')
+
+
+class HeartbeatTests(unittest.TestCase):
+
+    def setUp(self):
+        super(HeartbeatTests, self).setUp()
+        self.protocol = amqp.AMQPProtocol()
+        self.transport = helpers.FakeTransport(
+            self.protocol.connection_lost, None)
+        self.protocol.transport = self.transport
+        self.loop = asyncio.get_event_loop()
+
+    def tearDown(self):
+        if self.protocol.is_active:
+            self.protocol.close()
+            self.loop.run_until_complete(self.protocol.futures['closed'])
+
+    def run_connected_to_server(self, reader, writer):
+        reader.rewind()
+        coro = self.protocol.connected_to_server(reader, writer)
+        self.loop.run_until_complete(coro)
+        self.loop.run_until_complete(self.protocol.futures['connected'])
+        logging.info('server is connected')
+
+    @staticmethod
+    def install_frames(reader, heartbeat_freq):
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.START, 0,
+                                frames.CONNECTION_START)
+        data = bytearray(frames.TUNE)
+        data[-2:] = struct.pack('>H', heartbeat_freq)
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.TUNE, 0,
+                                data)
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.OPEN_OK, 0,
+                                frames.OPEN_OK)
+
+    def test_that_heartbeat_is_sent_as_required(self):
+        reader = helpers.AsyncBufferReader()
+        writer = helpers.FrameReceiver()
+        self.install_frames(reader, 1)
+        self.run_connected_to_server(reader, writer)
+
+        self.loop.run_until_complete(asyncio.sleep(2))
+        self.assertEqual(writer.frames[-1]['type'], wire.Frame.HEARTBEAT)
+
+    def test_that_heartbeat_is_cancelled_upon_closure(self):
+        reader = helpers.AsyncBufferReader(emulate_eof=True)
+        writer = helpers.FrameReceiver()
+        self.install_frames(reader, 10)
+        self.run_connected_to_server(reader, writer)
+
+        self.loop.call_later(0.1, self.transport.close)
+        self.loop.run_until_complete(self.protocol.wait_closed())
+        self.assertIsNone(self.protocol._ecg.next_scheduled)
+        self.assertTrue(self.protocol.futures['receiver'].done())

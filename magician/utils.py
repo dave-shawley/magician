@@ -105,6 +105,10 @@ class IOTracer(object):
         hexdump(self.logger, buffer)
         return buffer
 
+    def at_eof(self):
+        """Return self.reader.at_eof()"""
+        return self.reader.at_eof()
+
     def write(self, buffer):
         """
         Write `buffer` using :meth:`asyncio.StreamWriter.write`.

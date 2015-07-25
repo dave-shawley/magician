@@ -1,7 +1,11 @@
 """Errors detected and reported by this package."""
 
 
-class ProtocolFailure(Exception):
+class MagicianException(Exception):
+    """Root of exceptions for this library."""
+
+
+class ProtocolFailure(MagicianException):
     """
     Raised when a protocol violation is detected.
 

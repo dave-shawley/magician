@@ -52,10 +52,12 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
 
     """
 
-    def __init__(self, user=None, password=None, virtual_host=None):
+    def __init__(self, user=None, password=None, virtual_host=None,
+                 loop=None):
         self.logger = LOGGER.getChild('AMQPProtocol')
+        self.loop = loop or asyncio.get_event_loop()
         super(AMQPProtocol, self).__init__(asyncio.StreamReader(),
-                                           self.connected_to_server)
+                                           self.connected_to_server, loop)
         self.client_properties = DEFAULT_CLIENT_PROPERTIES.copy()
         self.user = user or 'guest'
         self.password = password or 'guest'
@@ -66,7 +68,9 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         self.futures = {
             'connected': asyncio.Future(),
             'closed': asyncio.Future(),
+            'receiver': None,
         }
+        self._ecg = None
 
     def connection_made(self, transport):
         """Extended to save the transport for future use."""
@@ -109,12 +113,14 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         frame = yield from self._authenticate(frame.body.security_mechanisms,
                                               frame.body.locales[0])
 
+        self._ecg = _HeartMonitor(self._loop, frame.body.heartbeat_delay,
+                                  self.close, self._send_heartbeat)
+
         self.logger.debug('issuing TuneOK channel_max=%d, frame_max=%d, '
                           'heartbeat_delay=%d', frame.body.channel_max,
-                          frame.body.frame_max, frame.body.heartbeat_delay)
+                          frame.body.frame_max, self._ecg.frequency)
         frame_data = wire.Connection.construct_tune_ok(
-            frame.body.channel_max, frame.body.frame_max,
-            frame.body.heartbeat_delay)
+            frame.body.channel_max, frame.body.frame_max, self._ecg.frequency)
         wire.write_frame(self.writer, wire.Frame.METHOD, 0, frame_data)
 
         self.logger.debug('connecting to virtual host %s', self.virtual_host)
@@ -122,22 +128,41 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         wire.write_frame(self.writer, wire.Frame.METHOD, 0, frame_data)
 
         frame = yield from wire.read_frame(self.reader)
-        yield from self._reject_unexpected_frame(frame, 10, 41)
+        yield from self._reject_unexpected_frame(
+            frame, wire.Connection.CLASS_ID, wire.Connection.Methods.OPEN_OK)
 
         self.futures['connected'].set_result(True)
 
+        future = self.loop.create_task(wire.read_frame(self.reader))
+        future.add_done_callback(self._process_frame)
+        self.futures['receiver'] = future
+
     def close(self):
+        self.logger.info('closing connection')
         if not self.futures['connected'].done():
             self.futures['connected'].set_exception(
                 RuntimeError('closed before connected'))
         self.transport.close()
 
+    @property
+    def is_active(self):
+        """Is this instance active? (i.e, not closed)"""
+        return (self.futures['connected'].done() and
+                not self.futures['closed'].done())
+
     def connection_lost(self, exc):
         self.logger.info('connection lost exception is %r', exc)
-        if exc:
-            self.futures['closed'].set_exception(exc)
-        else:
-            self.futures['closed'].set_result(True)
+        if self._ecg:
+            self._ecg.cancel()
+        if self.futures['receiver'] and not self.futures['receiver'].done():
+            self.logger.debug('cancelling frame receiver')
+            self.futures['receiver'].cancel()
+
+        if not self.futures['closed'].done():
+            if exc:
+                self.futures['closed'].set_exception(exc)
+            else:
+                self.futures['closed'].set_result(True)
 
     @asyncio.coroutine
     def wait_closed(self):
@@ -206,6 +231,33 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
                 expected_class, expected_method,
                 frame.body.class_id, frame.body.method_id)
 
+    def _process_frame(self, future):
+        self._ecg.heartbeat_received()
+        if future.cancelled():
+            self.logger.info('frame processing cancelled')
+        elif future.exception():
+            pass
+        else:
+            frame = future.result()
+            self.logger.info('result is %r', frame)
+
+            if frame is None:
+                if self.reader.at_eof():
+                    self.logger.warning('EOF received while reading')
+                    self.close()
+                    return
+
+                self.logger.warning('empty frame received')
+
+            self.logger.debug('scheduling next frame read')
+            future = self.loop.create_task(wire.read_frame(self.reader))
+            future.add_done_callback(self._process_frame)
+            self.futures['receiver'] = future
+
+    def _send_heartbeat(self):
+        self.logger.debug('sending heartbeat')
+        wire.write_frame(self.writer, wire.Frame.HEARTBEAT, 0, b'')
+
 
 @asyncio.coroutine
 def connect_to(amqp_url, loop=None):
@@ -224,14 +276,100 @@ def connect_to(amqp_url, loop=None):
 
     """
     parsed = parse.urlsplit(amqp_url)
+    loop = loop or asyncio.get_event_loop()
 
     def create_protocol():
-        return AMQPProtocol(parsed.username, parsed.password, parsed.path)
+        return AMQPProtocol(parsed.username, parsed.password,
+                            parsed.path, loop)
 
-    loop = loop or asyncio.get_event_loop()
     transport, protocol = yield from loop.create_connection(
         create_protocol, host=parsed.hostname, port=parsed.port or 5672)
 
     yield from protocol.futures['connected']
 
     return protocol
+
+
+class _HeartMonitor(object):
+    """
+    Monitors AMQP connection heartbeating
+
+    :param asyncio.EventLoop loop: instance to schedule IO on
+    :param int frequency: number of seconds between heartbeats
+    :param close_cb: called with no parameters to close the
+        connection.  This is used when two heartbeats are missed.
+    :param send_heartbeat_cb: called with no parameters to issue
+        a heartbeat on the connection
+
+    """
+
+    def __init__(self, loop, frequency, close_cb, send_heartbeat_cb):
+        self._logger = LOGGER.getChild('HeartMonitor')
+        self._send_heartbeat = send_heartbeat_cb
+        self._handle = None
+
+        self.frequency = frequency
+        self.last_recv_time = loop.time()
+        self.next_heartbeat = 0
+        self.schedule = loop.call_at
+        self.time = loop.time
+
+        if frequency > 0:
+            self._logger.debug('scheduling heartbeats every %ds', frequency)
+            self._handle = self.schedule(self.time() + frequency,
+                                         self._process, close_cb)
+        else:
+            self._logger.debug('heartbeats are disabled')
+
+    def _process(self, close_cb):
+        """
+        Closes when we miss heartbeats and issues them if necessary.
+
+        :param close_cb: called to close the connection if required
+
+        This method will reschedule itself and stores the the task handle
+        in ``self._handle``.
+
+        """
+        self._handle = None
+        now = self.time()
+        if now > self.next_expected:
+            self._logger.warn('have not received a heartbeat in %ds, closing',
+                              now - self.last_recv_time)
+            close_cb()
+            return
+
+        if now >= self.next_heartbeat:
+            self._send_heartbeat()
+            self.next_heartbeat = now + self.frequency
+
+        next_time = min(self.next_expected, self.next_heartbeat)
+        self._handle = self.schedule(next_time, self._process, close_cb)
+
+    def cancel(self):
+        """Cancels the last scheduled heartbeat call"""
+        if self._handle is not None:
+            LOGGER.debug('cancelling heartbeat')
+            self._handle.cancel()
+            self._handle = None
+
+    @property
+    def enabled(self):
+        """Are heartbeats enabled?"""
+        return self.frequency > 0
+
+    @property
+    def next_scheduled(self):
+        """Time of next scheduled heartbeat or ``None``."""
+        return self.next_heartbeat if self._handle else None
+
+    @property
+    def next_expected(self):
+        """Time of next expected heartbeat or ``None``."""
+        if self.frequency > 0:
+            return self.last_recv_time + (2 * self.frequency)
+        return None
+
+    def heartbeat_received(self):
+        """Reset the next expected heartbeat timer."""
+        self.last_recv_time = self.time()
