@@ -250,9 +250,7 @@ class HeartbeatTests(unittest.TestCase):
         self.install_frames(reader, 1)
         self.run_connected_to_server(reader, writer)
 
-        future = asyncio.Future()
-        self.loop.call_later(2, lambda: future.set_result(True))
-        self.loop.run_until_complete(future)
+        self.loop.run_until_complete(asyncio.sleep(2))
         self.assertEqual(writer.frames[-1]['type'], wire.Frame.HEARTBEAT)
 
     def test_that_heartbeat_is_cancelled_upon_closure(self):
@@ -263,5 +261,5 @@ class HeartbeatTests(unittest.TestCase):
 
         self.loop.call_later(0.1, self.transport.close)
         self.loop.run_until_complete(self.protocol.wait_closed())
-        self.assertFalse(self.protocol._ecg.scheduled)
+        self.assertIsNone(self.protocol._ecg.next_scheduled)
         self.assertTrue(self.protocol.futures['receiver'].done())
