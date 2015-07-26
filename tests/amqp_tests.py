@@ -258,10 +258,12 @@ class HeartbeatTests(unittest.TestCase):
         writer = helpers.FrameReceiver()
         self.install_frames(reader, 10)
         self.run_connected_to_server(reader, writer)
+        self.assertTrue(self.protocol._ecg.scheduled)
+        heartbeat_task = self.protocol._ecg._handle
 
         self.loop.call_later(0.1, self.transport.close)
         self.loop.run_until_complete(self.protocol.wait_closed())
-        self.assertFalse(self.protocol._ecg.scheduled)
+        self.assertTrue(heartbeat_task._cancelled)
         self.assertTrue(self.protocol.futures['receiver'].done())
 
 
@@ -354,3 +356,35 @@ class ConnectionManagementTests(unittest.TestCase):
                          wire.Connection.CLASS_ID)
         self.assertEqual(writer.frames[-1]['body'].method_id,
                          wire.Connection.Methods.CLOSE)
+
+    def test_that_connection_properties_are_reset_when_closed(self):
+        reader = helpers.AsyncBufferReader()
+        writer = helpers.FrameReceiver()
+
+        self.install_frames(reader, 0)
+        self.run_connected_to_server(reader, writer)
+        monitor = self.protocol._ecg
+
+        self.transport.close()
+        self.loop.run_until_complete(self.protocol.wait_closed())
+
+        self.assertIsNone(self.protocol.reader)
+        self.assertIsNone(self.protocol.writer)
+        self.assertIsNone(self.protocol._ecg)
+        self.assertIsNone(monitor.schedule)
+        self.assertIsNone(monitor.time)
+        self.assertIsNone(monitor._close_connection)
+        self.assertIsNone(monitor._send_heartbeat)
+
+    def test_that_close_is_idempotent(self):
+        reader = helpers.AsyncBufferReader()
+        writer = helpers.FrameReceiver()
+
+        self.install_frames(reader, 0)
+        self.run_connected_to_server(reader, writer)
+
+        self.transport.close()
+        self.loop.run_until_complete(self.protocol.wait_closed())
+
+        self.protocol.close()
+        self.loop.run_until_complete(self.protocol.wait_closed())

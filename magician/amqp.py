@@ -140,6 +140,9 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         self.futures['receiver'] = future
 
     def close(self):
+        if self.transport is None:
+            return
+
         self.logger.info('closing connection')
         peer_close = self._closing
         self._closing = True
@@ -174,7 +177,9 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
             self.logger.info('connection lost')
 
         if self._ecg:
-            self._ecg.cancel()
+            self._ecg.destroy()
+            self._ecg = None
+
         if self.futures['receiver'] and not self.futures['receiver'].done():
             self.logger.debug('cancelling frame receiver')
             self.futures['receiver'].cancel()
@@ -185,8 +190,15 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
             else:
                 self.futures['closed'].set_result(True)
 
+        self.reader = None
+        self.writer = None
+        self.transport = None
+
     @asyncio.coroutine
     def wait_closed(self):
+        if self.transport is None:
+            return
+
         yield from self.futures['closed']
 
     def consume_from(self, queue_name, callback):
@@ -413,7 +425,7 @@ class _HeartMonitor(object):
         self._handle = self.schedule(next_time, self._process)
 
     def cancel(self):
-        """Cancels the last scheduled heartbeat call"""
+        """Cancels any scheduled heartbeat call"""
         if self.scheduled:
             LOGGER.debug('cancelling heartbeat')
             self._handle.cancel()
@@ -446,3 +458,23 @@ class _HeartMonitor(object):
     def data_sent(self):
         """Reset the next expected heartbeat because we sent data."""
         self.last_send_time = self.time()
+
+    def destroy(self):
+        """
+        Render the monitor inoperable.
+
+        This method will cancel anything that is outstanding before
+        destroying all internal state.  This is the best way to force
+        the release of the callbacks which are potentially method
+        handles.
+
+        """
+        self.cancel()
+
+        # these reference IOLoop methods
+        self.schedule = None
+        self.time = None
+
+        # these (probably) reference Protocol methods
+        self._close_connection = None
+        self._send_heartbeat = None
