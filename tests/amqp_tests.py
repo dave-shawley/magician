@@ -317,3 +317,24 @@ class ConnectionManagementTests(unittest.TestCase):
 
         # the other side will close the transport which fires connection_lost
         self.transport.close()
+
+    def test_that_connection_initiated_close_waits_for_close_ok(self):
+        reader = helpers.AsyncBufferReader()
+        writer = helpers.FrameReceiver()
+
+        self.install_frames(reader, 0)
+        self.run_connected_to_server(reader, writer)
+
+        writer.clear()
+        self.protocol.close()  # protocol should issue a CLOSE
+        self.loop.run_until_complete(writer.frame_available)
+        self.assertEqual(writer.frames[-1]['body'].class_id,
+                         wire.Connection.CLASS_ID)
+        self.assertEqual(writer.frames[-1]['body'].method_id,
+                         wire.Connection.Methods.CLOSE)
+        self.assertFalse(self.transport.closed)
+
+        # peer issues a CLOSE-OK which triggers socket shutdown
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.CLOSE_OK, 0, b'')
+        self.loop.run_until_complete(self.protocol.wait_closed())

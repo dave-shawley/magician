@@ -140,11 +140,25 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
 
     def close(self):
         self.logger.info('closing connection')
+        peer_close = self._closing
         self._closing = True
+
         if not self.futures['connected'].done():
             self.futures['connected'].set_exception(
                 RuntimeError('closed before connected'))
-        self.transport.close()
+            # sec 2.2.4 - There is no hand-shaking for errors on connections
+            # that are not fully open. Following successful protocol header
+            # negotiation, which is defined in detail later, and prior to
+            # sending or receiving Open or Open-Ok, a peer that detects an
+            # error MUST close the socket without sending any further data.
+            self.transport.close()
+            return
+
+        if not peer_close:
+            wire.write_frame(self.writer, wire.Frame.METHOD, 0,
+                             wire.Connection.construct_close(200, 'OK'))
+        else:
+            self.transport.close()
 
     @property
     def is_active(self):
@@ -242,7 +256,8 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         if future.cancelled():
             self.logger.info('frame processing cancelled')
         elif future.exception():
-            self.logger.exception('exception when decoding unsolicited frame')
+            self.logger.error('exception when decoding '
+                              'unsolicited frame - %r', future.exception())
         else:
             need_another_frame = True
             frame = future.result()
@@ -276,7 +291,12 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
                         return False
 
                 elif frame.body.method_id == wire.Connection.Methods.CLOSE_OK:
-                    pass
+                    if self._closing:
+                        self.logger.debug('received close-ok')
+                        self.transport.close()
+                        return False
+
+                    self.logger.error('received unexpected close-ok')
 
         return True
 

@@ -355,6 +355,8 @@ class Connection(object):
             self.text, offset = decode_short_string(data, 4)
             self.failing_class_id, self.failing_method_id = struct.unpack(
                 '>HH', data[offset:])
+        elif self.method_id == self.Methods.CLOSE_OK:
+            pass  # no body
         else:
             raise errors.ProtocolFailure('unknown connection method {0}',
                                          self.Methods.name(self.method_id))
@@ -400,6 +402,16 @@ class Connection(object):
         writer = io.BytesIO()
         writer.write(struct.pack('>HH', cls.CLASS_ID, cls.Methods.SECURE_OK))
         encode_long_string(response, writer)
+        return writer.getvalue()
+
+    @classmethod
+    def construct_close(cls, status, reason,
+                        failing_class=0, failing_method=0):
+        writer = io.BytesIO()
+        writer.write(struct.pack('>HHH', cls.CLASS_ID, cls.Methods.CLOSE,
+                                 status))
+        encode_short_string(reason, writer)
+        writer.write(struct.pack('>HH', failing_class, failing_method))
         return writer.getvalue()
 
     def __str__(self):
