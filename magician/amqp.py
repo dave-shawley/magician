@@ -116,6 +116,7 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
 
         self._ecg = _HeartMonitor(self._loop, frame.body.heartbeat_delay,
                                   self.close, self._send_heartbeat)
+        self.writer.notify_write = self._ecg.data_sent
 
         self.logger.debug('issuing TuneOK channel_max=%d, frame_max=%d, '
                           'heartbeat_delay=%d', frame.body.channel_max,
@@ -441,3 +442,7 @@ class _HeartMonitor(object):
     def heartbeat_received(self):
         """Reset the next expected heartbeat timer."""
         self.last_recv_time = self.time()
+
+    def data_sent(self):
+        """Reset the next expected heartbeat because we sent data."""
+        self.last_send_time = self.time()
