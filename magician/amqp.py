@@ -354,27 +354,43 @@ class _HeartMonitor(object):
 
     def __init__(self, loop, frequency, close_cb, send_heartbeat_cb):
         self._logger = LOGGER.getChild('HeartMonitor')
+        self._close_connection = close_cb
         self._send_heartbeat = send_heartbeat_cb
+        self._frequency = None
         self._handle = None
 
-        self.frequency = frequency
+        self.last_send_time = loop.time()
         self.last_recv_time = loop.time()
-        self.next_heartbeat = 0
         self.schedule = loop.call_at
         self.time = loop.time
 
-        if frequency > 0:
-            self._logger.debug('scheduling heartbeats every %ds', frequency)
-            self._handle = self.schedule(self.time() + frequency,
-                                         self._process, close_cb)
+        # set this LAST since it will schedule the next heartbeat
+        self.frequency = frequency
+
+    @property
+    def frequency(self):
+        """
+        Number of seconds between sending heartbeats.
+
+        Setting this value will adjust the heartbeat schedule immediately
+        to ensure that heartbeats are not dropped.
+
+        """
+        return self._frequency
+
+    @frequency.setter
+    def frequency(self, value):
+        self.cancel()
+        self._frequency = value
+        if value > 0:
+            self._logger.debug('scheduling heartbeats every %fs', value)
+            self._process()
         else:
             self._logger.debug('heartbeats are disabled')
 
-    def _process(self, close_cb):
+    def _process(self):
         """
         Closes when we miss heartbeats and issues them if necessary.
-
-        :param close_cb: called to close the connection if required
 
         This method will reschedule itself and stores the the task handle
         in ``self._handle``.
@@ -383,21 +399,21 @@ class _HeartMonitor(object):
         self._handle = None
         now = self.time()
         if now > self.next_expected:
-            self._logger.warn('have not received a heartbeat in %ds, closing',
+            self._logger.warn('have not received a heartbeat in %fs, closing',
                               now - self.last_recv_time)
-            close_cb()
+            self._close_connection()
             return
 
-        if now >= self.next_heartbeat:
+        if now >= self.next_scheduled:
             self._send_heartbeat()
-            self.next_heartbeat = now + self.frequency
+            self.last_send_time = now
 
-        next_time = min(self.next_expected, self.next_heartbeat)
-        self._handle = self.schedule(next_time, self._process, close_cb)
+        next_time = min(self.next_expected, self.next_scheduled)
+        self._handle = self.schedule(next_time, self._process)
 
     def cancel(self):
         """Cancels the last scheduled heartbeat call"""
-        if self._handle is not None:
+        if self.scheduled:
             LOGGER.debug('cancelling heartbeat')
             self._handle.cancel()
             self._handle = None
@@ -409,15 +425,18 @@ class _HeartMonitor(object):
 
     @property
     def next_scheduled(self):
-        """Time of next scheduled heartbeat or ``None``."""
-        return self.next_heartbeat if self._handle else None
+        """Time of next scheduled heartbeat."""
+        return self.last_send_time + self.frequency
 
     @property
     def next_expected(self):
-        """Time of next expected heartbeat or ``None``."""
-        if self.frequency > 0:
-            return self.last_recv_time + (2 * self.frequency)
-        return None
+        """Time of next expected heartbeat."""
+        return self.last_recv_time + (2 * self.frequency)
+
+    @property
+    def scheduled(self):
+        """Is there an outstanding heartbeat task?"""
+        return self._handle is not None
 
     def heartbeat_received(self):
         """Reset the next expected heartbeat timer."""

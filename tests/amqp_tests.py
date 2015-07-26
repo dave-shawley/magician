@@ -247,9 +247,10 @@ class HeartbeatTests(unittest.TestCase):
         self.install_frames(reader, 1)
         self.run_connected_to_server(reader, writer)
 
-        self.loop.run_until_complete(asyncio.sleep(1))
+        self.protocol._ecg.frequency = 0.1
+        self.loop.run_until_complete(asyncio.sleep(0.1))
         reader.add_frame(wire.Frame.HEARTBEAT, 0)
-        self.loop.run_until_complete(asyncio.sleep(1))
+        self.loop.run_until_complete(asyncio.sleep(0.1))
         self.assertEqual(writer.frames[-1]['type'], wire.Frame.HEARTBEAT)
 
     def test_that_heartbeat_is_cancelled_upon_closure(self):
@@ -260,7 +261,7 @@ class HeartbeatTests(unittest.TestCase):
 
         self.loop.call_later(0.1, self.transport.close)
         self.loop.run_until_complete(self.protocol.wait_closed())
-        self.assertIsNone(self.protocol._ecg.next_scheduled)
+        self.assertFalse(self.protocol._ecg.scheduled)
         self.assertTrue(self.protocol.futures['receiver'].done())
 
 
@@ -338,3 +339,18 @@ class ConnectionManagementTests(unittest.TestCase):
         reader.add_method_frame(wire.Connection.CLASS_ID,
                                 wire.Connection.Methods.CLOSE_OK, 0, b'')
         self.loop.run_until_complete(self.protocol.wait_closed())
+
+    def test_that_connection_is_closed_when_heartbeats_are_missed(self):
+        reader = helpers.AsyncBufferReader()
+        writer = helpers.FrameReceiver()
+
+        self.install_frames(reader, 1)
+        self.run_connected_to_server(reader, writer)
+
+        self.protocol._ecg.frequency = 0.1
+        self.loop.run_until_complete(asyncio.sleep(0.3))
+
+        self.assertEqual(writer.frames[-1]['body'].class_id,
+                         wire.Connection.CLASS_ID)
+        self.assertEqual(writer.frames[-1]['body'].method_id,
+                         wire.Connection.Methods.CLOSE)
