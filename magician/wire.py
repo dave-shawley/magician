@@ -423,7 +423,7 @@ def read_frame(reader):
         return None
 
     frame_type, channel, frame_size = struct.unpack('>BHI', frame_header)
-    frame_body = yield from reader.read(frame_size)
+    frame_body = yield from reader.read(frame_size) if frame_size else b''
     frame_end = yield from reader.read(1)
     if frame_end != Frame.END_BYTE:
         raise errors.ProtocolFailure('invalid frame end ({0!r}) received',
