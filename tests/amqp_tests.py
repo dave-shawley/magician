@@ -79,7 +79,6 @@ class ProtocolViolationTests(unittest.TestCase):
         self.protocol.transport = self.transport
 
     def run_connected_to_server(self, reader, writer):
-        reader.rewind()
         coro = self.protocol.connected_to_server(reader, writer)
         asyncio.get_event_loop().run_until_complete(coro)
 
@@ -144,7 +143,6 @@ class ProtocolAuthenticationTests(unittest.TestCase):
         self.protocol.transport = self.transport
 
     def run_connected_to_server(self, reader, writer):
-        reader.rewind()
         coro = self.protocol.connected_to_server(reader, writer)
         asyncio.get_event_loop().run_until_complete(coro)
 
@@ -224,7 +222,6 @@ class HeartbeatTests(unittest.TestCase):
             self.loop.run_until_complete(self.protocol.wait_closed())
 
     def run_connected_to_server(self, reader, writer):
-        reader.rewind()
         coro = self.protocol.connected_to_server(reader, writer)
         self.loop.run_until_complete(coro)
         self.loop.run_until_complete(self.protocol.futures['connected'])
@@ -250,7 +247,9 @@ class HeartbeatTests(unittest.TestCase):
         self.install_frames(reader, 1)
         self.run_connected_to_server(reader, writer)
 
-        self.loop.run_until_complete(asyncio.sleep(2))
+        self.loop.run_until_complete(asyncio.sleep(1))
+        reader.add_frame(wire.Frame.HEARTBEAT, 0)
+        self.loop.run_until_complete(asyncio.sleep(1))
         self.assertEqual(writer.frames[-1]['type'], wire.Frame.HEARTBEAT)
 
     def test_that_heartbeat_is_cancelled_upon_closure(self):
@@ -281,7 +280,6 @@ class ConnectionManagementTests(unittest.TestCase):
             self.loop.run_until_complete(self.protocol.wait_closed())
 
     def run_connected_to_server(self, reader, writer):
-        reader.rewind()
         self.loop.run_until_complete(self.protocol.connected_to_server(
             reader, writer))
 
