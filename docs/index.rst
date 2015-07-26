@@ -5,3 +5,4 @@ API Documentation
 .. toctree::
 
    api
+   protocol
