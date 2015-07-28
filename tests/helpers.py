@@ -1,5 +1,6 @@
 from asyncio import base_events
 import asyncio
+import contextlib
 import io
 import struct
 
@@ -12,14 +13,23 @@ class Prototype(object):
 
 
 class AsyncBufferReader(object):
-    """Simple implementation of asyncio.StreamReader over a buffer."""
+    """
+    Implementation of asyncio.StreamReader over a buffer.
+
+    This is a little tricky to get right.  Since we need to be able to
+    inject frames while the test code is running, there is a Future that
+    gets created when it is needed.  We also need to track both the read
+    and write offsets so that we can read and write in an overlapped
+    manner.
+
+    """
 
     def __init__(self, emulate_eof=False):
         super(AsyncBufferReader, self).__init__()
         self.stream = io.BytesIO()
-        self._max_size = 0
+        self._offsets = {'read': 0, 'write': 0}
         self._emulate_eof = emulate_eof
-        self._heartbeat_frame = b'\x08\x00\x00\x00\x00\xCE'
+        self._wait_frame_available = None
 
     def add_method_frame(self, class_id, method_id, channel, *buffers):
         """
@@ -31,30 +41,54 @@ class AsyncBufferReader(object):
         :param buffers: arbitrary number of byte buffers to append
 
         """
-        payload_size = sum(len(buffer) for buffer in buffers)
-        iobuf = io.BytesIO()
-        iobuf.write(struct.pack('>BHI', wire.Frame.METHOD, channel,
-                                payload_size + 4))
-        iobuf.write(struct.pack('>HH', class_id, method_id))
-        self.stream.write(iobuf.getvalue())
-        self.add_buffers(*buffers)
-        self.stream.write(wire.Frame.END_BYTE)
-        self._max_size = max(self.stream.tell(), self._max_size)
+        self.add_frame(wire.Frame.METHOD, channel,
+                       struct.pack('>HH', class_id, method_id), *buffers)
 
-    def add_buffers(self, *buffers):
-        """Append an arbitrary number of byte buffers to the stream."""
-        for buffer in buffers:
-            self.stream.write(buffer)
-        self._max_size = max(self.stream.tell(), self._max_size)
+    def add_frame(self, frame_type, channel, *body):
+        """
+        Add a complete frame.
 
-    def rewind(self):
-        self.stream.seek(0)
+        :param int frame_type: AMQP frame type
+        :param int channel: channel that the frame is assocatied with
+        :param body: frame body omitting the end byte
+
+        """
+        frame = io.BytesIO()
+        payload_size = sum(len(chunk) for chunk in body)
+        frame.write(struct.pack('>BHI', frame_type, channel, payload_size))
+        for chunk in body:
+            frame.write(chunk)
+        frame.write(wire.Frame.END_BYTE)
+        self.emit_frame(frame.getvalue())
+
+    def emit_frame(self, frame):
+        """
+        Emit a frame.
+
+        :param bytes frame: assembled frame to emit
+
+        If the someone is currently wiating for a frame, then delivery
+        it using the future; otherwise, write it to the output stream.
+        Note that this method **does not** require a valid frame so you
+        can use it to inject malformed frames into the stream.
+
+        """
+        with self.maintain_offset('write'):
+            self.stream.write(frame)
+        if self._wait_frame_available is not None:
+            self._wait_frame_available.set_result(None)
 
     @asyncio.coroutine
     def read(self, num_bytes):
-        buf = self.stream.read(num_bytes)
+        with self.maintain_offset('read'):
+            buf = self.stream.read(num_bytes)
+
         if not buf and not self._emulate_eof:
-            return self._heartbeat_frame
+            self._wait_frame_available = asyncio.Future()
+            yield from self._wait_frame_available
+            self._wait_frame_available = None
+            buf = yield from self.read(num_bytes)
+
         return buf
 
     def exception(self):
@@ -64,7 +98,14 @@ class AsyncBufferReader(object):
         pass
 
     def at_eof(self):
-        return self._emulate_eof and self.stream.tell() == self._max_size
+        return (self._emulate_eof and
+                self._offsets['read'] == self._offsets['write'])
+
+    @contextlib.contextmanager
+    def maintain_offset(self, offset_name):
+        self.stream.seek(self._offsets[offset_name])
+        yield
+        self._offsets[offset_name] = self.stream.tell()
 
 
 class FakeEventLoop(base_events.BaseEventLoop):
@@ -96,15 +137,29 @@ class FrameReceiver(object):
         super(FrameReceiver, self).__init__()
         self._buffer = io.BytesIO()
         self._frames = []
+        self.frame_available = asyncio.Future()
 
     def write(self, buffer):
         self._buffer.write(buffer)
+        if wire.Frame.END_BYTE in buffer:
+            if not self.frame_available.done():
+                self.frame_available.set_result(True)
+
+    def clear(self):
+        if not self.frame_available.done():
+            self.frame_available.cancel()
+        self.frame_available = asyncio.Future()
+        self._buffer.seek(0)
+        self._buffer.truncate(0)
 
     @property
     def frames(self):
         """List of decoded frames."""
         if self._buffer.tell() != 0:
             self._decode_frames()
+            if not self.frame_available.done():
+                self.frame_available.set_result(True)
+                self.frame_available = asyncio.Future()
         return self._frames
 
     def _decode_frames(self):

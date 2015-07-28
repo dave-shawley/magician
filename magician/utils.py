@@ -82,12 +82,19 @@ class IOTracer(object):
 
        :class:`logging.Logger` instance that bytes will be dumped on.
 
+    .. attribute:: notify_write
+
+       If this is not :data:`None`, then it will be called whenever
+       data is written.  This is most useful to update the heartbeat
+       timer when data is sent.
+
     """
     logger = logging.getLogger('magician.trace')
 
     def __init__(self, reader, writer):
         self.reader = reader
         self.writer = writer
+        self.notify_write = None
 
     @asyncio.coroutine
     def read(self, num_bytes):
@@ -121,3 +128,5 @@ class IOTracer(object):
         self.logger.debug('writing %d bytes', len(buffer))
         hexdump(self.logger, buffer)
         self.writer.write(buffer)
+        if self.notify_write:
+            self.notify_write()

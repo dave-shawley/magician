@@ -16,15 +16,6 @@ class FrameTests(unittest.TestCase):
     def process_method_frame(self, class_id, method_id, frame_body):
         reader = helpers.AsyncBufferReader()
         reader.add_method_frame(class_id, method_id, 0, frame_body)
-        reader.rewind()
-        return self.loop.run_until_complete(wire.read_frame(reader))
-
-    def process_frame(self, frame_type, channel, frame_body):
-        reader = helpers.AsyncBufferReader()
-        reader.add_buffers(
-            struct.pack('>BHI', frame_type, channel, len(frame_body)),
-            frame_body)
-        reader.rewind()
         return self.loop.run_until_complete(wire.read_frame(reader))
 
     def test_that_connection_start_frame_decodes(self):
@@ -56,18 +47,21 @@ class FrameTests(unittest.TestCase):
         self.assertEqual(frame.body.heartbeat_delay, 0x244)
 
     def test_that_missing_frame_end_raises_exception(self):
-        reader = helpers.AsyncBufferReader()
-        reader.add_buffers(
-            struct.pack('>BHI', wire.Frame.METHOD, 0, len(frames.TUNE)),
-            frames.TUNE)
-        # omitted wire.Frame.END_BYTE
-        reader.rewind()
+        # build a frame that omits the end byte
+        frame = io.BytesIO()
+        frame.write(struct.pack('>BHI', wire.Frame.METHOD, 0,
+                                len(frames.TUNE)))
+
+        reader = helpers.AsyncBufferReader(emulate_eof=True)
+        reader.emit_frame(frame.getvalue())
         with self.assertRaises(errors.ProtocolFailure):
             self.loop.run_until_complete(wire.read_frame(reader))
 
     def test_that_heartbeat_on_specific_channel_raises_exception(self):
+        reader = helpers.AsyncBufferReader()
+        reader.add_frame(wire.Frame.HEARTBEAT, 23, b'')
         with self.assertRaises(errors.ProtocolFailure):
-            self.process_frame(wire.Frame.HEARTBEAT, 1, b'')
+            self.loop.run_until_complete(wire.read_frame(reader))
 
 
 class EncodingTests(unittest.TestCase):

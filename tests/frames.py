@@ -34,3 +34,10 @@ TUNE = (
 OPEN_OK = (
     b'\x09localhost'
 )
+
+CLOSE = (
+    b'\x01\x40'
+    b'\x30CONNECTION_FORCED - Closed via management plugin'
+    b'\x00\x00'
+    b'\x00\x00'
+)

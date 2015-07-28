@@ -79,7 +79,6 @@ class ProtocolViolationTests(unittest.TestCase):
         self.protocol.transport = self.transport
 
     def run_connected_to_server(self, reader, writer):
-        reader.rewind()
         coro = self.protocol.connected_to_server(reader, writer)
         asyncio.get_event_loop().run_until_complete(coro)
 
@@ -144,7 +143,6 @@ class ProtocolAuthenticationTests(unittest.TestCase):
         self.protocol.transport = self.transport
 
     def run_connected_to_server(self, reader, writer):
-        reader.rewind()
         coro = self.protocol.connected_to_server(reader, writer)
         asyncio.get_event_loop().run_until_complete(coro)
 
@@ -221,10 +219,9 @@ class HeartbeatTests(unittest.TestCase):
     def tearDown(self):
         if self.protocol.is_active:
             self.protocol.close()
-            self.loop.run_until_complete(self.protocol.futures['closed'])
+            self.loop.run_until_complete(self.protocol.wait_closed())
 
     def run_connected_to_server(self, reader, writer):
-        reader.rewind()
         coro = self.protocol.connected_to_server(reader, writer)
         self.loop.run_until_complete(coro)
         self.loop.run_until_complete(self.protocol.futures['connected'])
@@ -250,7 +247,10 @@ class HeartbeatTests(unittest.TestCase):
         self.install_frames(reader, 1)
         self.run_connected_to_server(reader, writer)
 
-        self.loop.run_until_complete(asyncio.sleep(2))
+        self.protocol._ecg.frequency = 0.1
+        self.loop.run_until_complete(asyncio.sleep(0.1))
+        reader.add_frame(wire.Frame.HEARTBEAT, 0)
+        self.loop.run_until_complete(asyncio.sleep(0.1))
         self.assertEqual(writer.frames[-1]['type'], wire.Frame.HEARTBEAT)
 
     def test_that_heartbeat_is_cancelled_upon_closure(self):
@@ -258,8 +258,133 @@ class HeartbeatTests(unittest.TestCase):
         writer = helpers.FrameReceiver()
         self.install_frames(reader, 10)
         self.run_connected_to_server(reader, writer)
+        self.assertTrue(self.protocol._ecg.scheduled)
+        heartbeat_task = self.protocol._ecg._handle
 
         self.loop.call_later(0.1, self.transport.close)
         self.loop.run_until_complete(self.protocol.wait_closed())
-        self.assertIsNone(self.protocol._ecg.next_scheduled)
+        self.assertTrue(heartbeat_task._cancelled)
         self.assertTrue(self.protocol.futures['receiver'].done())
+
+
+class ConnectionManagementTests(unittest.TestCase):
+
+    def setUp(self):
+        super(ConnectionManagementTests, self).setUp()
+        self.protocol = amqp.AMQPProtocol()
+        self.transport = helpers.FakeTransport(
+            self.protocol.connection_lost, None)
+        self.protocol.transport = self.transport
+        self.loop = asyncio.get_event_loop()
+
+    def tearDown(self):
+        if self.protocol.is_active:
+            self.protocol.close()
+            self.loop.run_until_complete(self.protocol.wait_closed())
+
+    def run_connected_to_server(self, reader, writer):
+        self.loop.run_until_complete(self.protocol.connected_to_server(
+            reader, writer))
+
+    @staticmethod
+    def install_frames(reader, heartbeat_freq):
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.START, 0,
+                                frames.CONNECTION_START)
+        data = bytearray(frames.TUNE)
+        data[-2:] = struct.pack('>H', heartbeat_freq)
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.TUNE, 0,
+                                data)
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.OPEN_OK, 0,
+                                frames.OPEN_OK)
+
+    def test_that_server_initiated_close_results_in_close_ok(self):
+        reader = helpers.AsyncBufferReader()
+        writer = helpers.FrameReceiver()
+
+        # wire standard frames plus a CLOSE frame
+        self.install_frames(reader, 0)
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.CLOSE, 0, frames.CLOSE)
+        self.run_connected_to_server(reader, writer)
+
+        # protocol should issue a CLOSE-OK
+        writer.clear()
+        self.loop.run_until_complete(writer.frame_available)
+        self.assertEqual(writer.frames[-1]['body'].class_id,
+                         wire.Connection.CLASS_ID)
+        self.assertEqual(writer.frames[-1]['body'].method_id,
+                         wire.Connection.Methods.CLOSE_OK)
+
+        # the other side will close the transport which fires connection_lost
+        self.transport.close()
+
+    def test_that_connection_initiated_close_waits_for_close_ok(self):
+        reader = helpers.AsyncBufferReader()
+        writer = helpers.FrameReceiver()
+
+        self.install_frames(reader, 0)
+        self.run_connected_to_server(reader, writer)
+
+        writer.clear()
+        self.protocol.close()  # protocol should issue a CLOSE
+        self.loop.run_until_complete(writer.frame_available)
+        self.assertEqual(writer.frames[-1]['body'].class_id,
+                         wire.Connection.CLASS_ID)
+        self.assertEqual(writer.frames[-1]['body'].method_id,
+                         wire.Connection.Methods.CLOSE)
+        self.assertFalse(self.transport.closed)
+
+        # peer issues a CLOSE-OK which triggers socket shutdown
+        reader.add_method_frame(wire.Connection.CLASS_ID,
+                                wire.Connection.Methods.CLOSE_OK, 0, b'')
+        self.loop.run_until_complete(self.protocol.wait_closed())
+
+    def test_that_connection_is_closed_when_heartbeats_are_missed(self):
+        reader = helpers.AsyncBufferReader()
+        writer = helpers.FrameReceiver()
+
+        self.install_frames(reader, 1)
+        self.run_connected_to_server(reader, writer)
+
+        self.protocol._ecg.frequency = 0.1
+        self.loop.run_until_complete(asyncio.sleep(0.3))
+
+        self.assertEqual(writer.frames[-1]['body'].class_id,
+                         wire.Connection.CLASS_ID)
+        self.assertEqual(writer.frames[-1]['body'].method_id,
+                         wire.Connection.Methods.CLOSE)
+
+    def test_that_connection_properties_are_reset_when_closed(self):
+        reader = helpers.AsyncBufferReader()
+        writer = helpers.FrameReceiver()
+
+        self.install_frames(reader, 0)
+        self.run_connected_to_server(reader, writer)
+        monitor = self.protocol._ecg
+
+        self.transport.close()
+        self.loop.run_until_complete(self.protocol.wait_closed())
+
+        self.assertIsNone(self.protocol.reader)
+        self.assertIsNone(self.protocol.writer)
+        self.assertIsNone(self.protocol._ecg)
+        self.assertIsNone(monitor.schedule)
+        self.assertIsNone(monitor.time)
+        self.assertIsNone(monitor._close_connection)
+        self.assertIsNone(monitor._send_heartbeat)
+
+    def test_that_close_is_idempotent(self):
+        reader = helpers.AsyncBufferReader()
+        writer = helpers.FrameReceiver()
+
+        self.install_frames(reader, 0)
+        self.run_connected_to_server(reader, writer)
+
+        self.transport.close()
+        self.loop.run_until_complete(self.protocol.wait_closed())
+
+        self.protocol.close()
+        self.loop.run_until_complete(self.protocol.wait_closed())

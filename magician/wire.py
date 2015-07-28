@@ -292,6 +292,8 @@ class Connection(object):
     - **Connection.Tune**: ``channel_max``, ``frame_max``,
       ``heartbeat_delay``
     - **Connection.OpenOK**: ``known_hosts``
+    - **Connection.Close**: ``code``, ``text``, ``failing_class_id``,
+      ``failing_method_id``
 
     """
     CLASS_ID = 10
@@ -302,6 +304,7 @@ class Connection(object):
         SECURE, SECURE_OK = 20, 21
         TUNE, TUNE_OK = 30, 31
         OPEN, OPEN_OK = 40, 41
+        CLOSE, CLOSE_OK = 50, 51
         names = {
             START: 'start',
             START_OK: 'start_ok',
@@ -311,6 +314,8 @@ class Connection(object):
             TUNE_OK: 'tune_ok',
             OPEN: 'open',
             OPEN_OK: 'open_ok',
+            CLOSE: 'close',
+            CLOSE_OK: 'close_ok',
         }
 
         @classmethod
@@ -345,6 +350,13 @@ class Connection(object):
                 struct.unpack('>HIH', data[2:10])
         elif self.method_id == self.Methods.OPEN_OK:
             self.known_hosts = decode_short_string(data, 2)
+        elif self.method_id == self.Methods.CLOSE:
+            self.code = (data[2] << 8) | data[3]
+            self.text, offset = decode_short_string(data, 4)
+            self.failing_class_id, self.failing_method_id = struct.unpack(
+                '>HH', data[offset:])
+        elif self.method_id == self.Methods.CLOSE_OK:
+            pass  # no body
         else:
             raise errors.ProtocolFailure('unknown connection method {0}',
                                          self.Methods.name(self.method_id))
@@ -392,6 +404,16 @@ class Connection(object):
         encode_long_string(response, writer)
         return writer.getvalue()
 
+    @classmethod
+    def construct_close(cls, status, reason,
+                        failing_class=0, failing_method=0):
+        writer = io.BytesIO()
+        writer.write(struct.pack('>HHH', cls.CLASS_ID, cls.Methods.CLOSE,
+                                 status))
+        encode_short_string(reason, writer)
+        writer.write(struct.pack('>HH', failing_class, failing_method))
+        return writer.getvalue()
+
     def __str__(self):
         return '<Connection.{0}>'.format(self.Methods.name(self.method_id))
 
@@ -413,7 +435,7 @@ def read_frame(reader):
         return None
 
     frame_type, channel, frame_size = struct.unpack('>BHI', frame_header)
-    frame_body = yield from reader.read(frame_size)
+    frame_body = yield from reader.read(frame_size) if frame_size else b''
     frame_end = yield from reader.read(1)
     if frame_end != Frame.END_BYTE:
         raise errors.ProtocolFailure('invalid frame end ({0!r}) received',
