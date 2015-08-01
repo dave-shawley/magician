@@ -114,7 +114,7 @@ class AMQPProtocol(asyncio.StreamReaderProtocol):
         frame = yield from self._authenticate(frame.body.security_mechanisms,
                                               frame.body.locales[0])
 
-        self._ecg = _HeartMonitor(self._loop, frame.body.heartbeat_delay,
+        self._ecg = _HeartMonitor(self.loop, frame.body.heartbeat_delay,
                                   self.close, self._send_heartbeat)
         self.writer.notify_write = self._ecg.data_sent
 
