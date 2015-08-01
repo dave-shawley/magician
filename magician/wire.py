@@ -428,15 +428,30 @@ def read_frame(reader):
     :raise: :class:`magician.errors.ProtocolFailure`
 
     """
-    frame_header = yield from reader.read(7)
+
+    @asyncio.coroutine
+    def read_bytes(num_bytes):
+        buf = bytearray()
+        while num_bytes > 0:
+            bytes_read = yield from reader.read(num_bytes)
+            if bytes_read == b'':
+                if reader.at_eof():
+                    break
+            buf.extend(bytes_read)
+            num_bytes -= len(bytes_read)
+            if num_bytes > 0:
+                LOGGER.debug('partial read, %d bytes remaining', num_bytes)
+        return bytes(buf)
+
+    frame_header = yield from read_bytes(7)
     LOGGER.debug('received frame header %r', frame_header)
     if not frame_header:
         LOGGER.info('received zero bytes')
         return None
 
     frame_type, channel, frame_size = struct.unpack('>BHI', frame_header)
-    frame_body = yield from reader.read(frame_size) if frame_size else b''
-    frame_end = yield from reader.read(1)
+    frame_body = yield from read_bytes(frame_size) if frame_size else b''
+    frame_end = yield from read_bytes(1)
     if frame_end != Frame.END_BYTE:
         raise errors.ProtocolFailure('invalid frame end ({0!r}) received',
                                      frame_end)

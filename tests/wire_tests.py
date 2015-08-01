@@ -63,6 +63,27 @@ class FrameTests(unittest.TestCase):
         with self.assertRaises(errors.ProtocolFailure):
             self.loop.run_until_complete(wire.read_frame(reader))
 
+    def test_that_partial_reads_are_supported(self):
+        frame = frames.CONNECTION_START[:]
+        reader = asyncio.StreamReader()
+        reader.feed_data(struct.pack('>BHIHH',
+                                     wire.Frame.METHOD, 0,
+                                     len(frame) + 4,
+                                     wire.Connection.CLASS_ID,
+                                     wire.Connection.Methods.START))
+
+        task = self.loop.create_task(wire.read_frame(reader))
+        while frame:
+            reader.feed_data(frame[:42])
+            frame = frame[42:]
+            self.loop.run_until_complete(asyncio.wait([task], timeout=0.01))
+        reader.feed_data(wire.Frame.END_BYTE)
+        frame = self.loop.run_until_complete(task)
+        self.assertIsNotNone(frame)
+        self.assertEqual(frame.frame_type, wire.Frame.METHOD)
+        self.assertEqual(frame.body.class_id, wire.Connection.CLASS_ID)
+        self.assertEqual(frame.body.method_id, wire.Connection.Methods.START)
+
 
 class EncodingTests(unittest.TestCase):
     UNICODE_VALUE = u'Ang\u00E9liqu\u00E9'
